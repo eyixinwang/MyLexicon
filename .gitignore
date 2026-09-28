@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*
+!.env.example
+.DS_Store
+coverage/
+*.tsbuildinfo
+*.log
+backups/
+mylexicon-*.json

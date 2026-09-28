@@ -1,0 +1,29 @@
+{
+  "name": "mylexicon",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build && node scripts/generate-sw.mjs",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "vitest run",
+    "format": "prettier --write src scripts vite.config.ts"
+  },
+  "dependencies": {
+    "idb": "^8.0.3",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "ts-fsrs": "^5.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "prettier": "^3.9.9",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "^4.0.16"
+  }
+}
