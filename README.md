@@ -2,7 +2,7 @@
 
 Current scaffold release: **v0.0.1**.
 
-A personal English learning app for collecting words, phrases, and sentences, adding Chinese meanings and context, and reviewing what you choose to practise. This implementation is a static React PWA with browser storage and optional Google Drive sync. Dictionary and AI integrations are reserved for later work.
+A personal English learning app for collecting words, phrases, and sentences, adding Chinese meanings and context, and reviewing what you choose to practise. This implementation is a static React PWA with browser storage, Gemini lookup and translation, and optional Google Drive sync.
 
 ## Run locally
 
@@ -13,7 +13,28 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite. Manual capture, search, review, JSON export/import, and offline use after a production PWA installation work without Google configuration. `npm test` runs the meaningful data merge tests, and `npm run build` creates the production `dist/` directory and service worker.
+Open the local URL printed by Vite. Manual capture, search, review, JSON export/import, and offline use after a production PWA installation work without Google configuration. `npm test` covers data merging, AI response validation, and local-first query behavior. `npm run build` creates the production `dist/` directory and service worker.
+
+## Gemini lookup & translation
+
+The homepage accepts English words, phrases, and sentences, Chinese expressions, and Chinese requests such as “我想礼貌地说我需要更多时间”. It uses **models/gemini-3.8-flash**, with a structured JSON response, following Google's [structured output documentation](https://ai.google.dev/gemini-api/docs/generate-content/structured-output) and [REST API reference](https://ai.google.dev/api/generate-content#TextResponseFormat).
+
+The app searches the current local library before making any AI request. An exact saved expression, Chinese meaning, original query, or English alternative is reused with no API call. Context and meaning notes are searchable too. Related matches are shown first; choose **ask Gemini for this expression** if they do not answer the query. Only submitted queries are sent, not keystrokes or the full library. Saved matches work offline.
+
+Validated new answers appear as an unsaved preview. Choose **Save response**, **Edit before saving**, or **Discard response**. Editing opens the full entry form with the AI fields already filled in; its **Save entry** button saves your modified version. Cancelling editing returns to the preview. Nothing is added to the local library, Drive sync, backups, or review history until you save. Entries include Chinese meaning, English explanation, part of speech, pronunciation when useful, tone, formality, spoken/written use, domain, and bilingual examples. The Library has **Words & phrases** and **Sentences** categories. AI answers are labelled and retain their model and original query. Old version-1 backups remain supported. Unsaved previews last only while the homepage remains open.
+
+Chinese-to-English queries request 4–6 distinct contextual options where useful variety exists, with fewer for fixed terms. English phrase and sentence queries also request alternatives when helpful. A comparison table shows each English option, Chinese context/tone guidance, spoken/written suitability, and any meaning change (for example, “another problem” adds the idea of recurrence). These options remain together in one lexicon entry and can be edited, added, or removed before saving and afterwards. Existing entries with only spoken/written versions keep their original display. The prompt requests faithful translations and explicit nuance notes; model output still needs your review.
+
+Word queries request separate British (UK) and American (US) IPA transcriptions. These are shown in previews and saved cards, editable, and included in backups and Drive sync. The model leaves uncertain pronunciation fields empty rather than guessing. Existing undifferentiated pronunciation notes remain available; they are not automatically assigned to an accent.
+
+In the Library, **Used in** filters work together with search and the **Words & phrases / Sentences** categories. **Speaking** and **Writing** each include entries labelled **both**; choose **Speaking & writing (both)** for only those entries. Older entries without a usage label appear under **All usage** or **Not classified**. Filtering applies to the main expression's usage, not to its contextual alternatives, and does not affect local-first AI lookup.
+
+Configure a key in either of these ways:
+
+- **Local development:** set `GEMINI_API_KEY` in the ignored `.env.local` file and restart `npm run dev`. The development server runs on `127.0.0.1` and proxies only local, same-origin requests to the fixed Gemini model. The private key is never included in the built client. Do not rename it to a `VITE_` variable, which would expose it in public assets.
+- **Hosted app or production preview:** open **Settings → Google Gemini**, paste your own Google AI Studio key, and save it on that device. GitHub Pages is static, so these requests go directly from the browser to Google. The key is kept in local device metadata and excluded from operation logs, Drive sync, and JSON exports. It is accessible to this browser and site code; use a trusted personal device, restrict the key to the intended API/origins where supported, and set project quotas. Configure each device separately. See Google's [API key guidance](https://ai.google.dev/gemini-api/docs/api-key).
+
+No private key belongs in repository files, GitHub Pages assets, or build variables. Google project quota and billing apply to new AI requests. Failed, cancelled, blocked, truncated, or invalid responses are not saved. If saving fails, the preview or edited response remains available so you can retry saving without another AI request.
 
 ## Connect Google Drive
 
@@ -44,4 +65,4 @@ Every edit is saved to IndexedDB before the UI reports success. Entry changes ha
 
 JSON export contains entries and review history as a versioned operation log. Import validates the data and merges by operation ID. Browser storage can be cleared, and Drive app data can be removed from Google, so keep occasional downloaded exports. The app does not currently compact old Drive batches or provide encrypted local storage. For the small personal collections targeted here, this preserves history and keeps conflict recovery straightforward.
 
-See [DESIGN.md](DESIGN.md) for the broader project design and the planned dictionary and optional AI boundaries.
+See [DESIGN.md](DESIGN.md) for the broader original design. The Gemini implementation above supersedes its initial AI-disabled milestone; the packaged dictionary remains future work.

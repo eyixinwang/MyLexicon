@@ -1,5 +1,26 @@
 export type EntryKind = 'word' | 'phrase' | 'sentence'
 export type RatingValue = 1 | 2 | 3 | 4
+export type UsageMedium = 'spoken' | 'written' | 'both'
+export type EntryCategory = 'expressions' | 'sentences'
+
+export interface UsageExample {
+  en: string
+  zh: string
+}
+
+export interface TranslationAlternative {
+  en: string
+  contextZh: string
+  medium: UsageMedium
+  meaningNotesZh: string
+}
+
+export interface EntrySource {
+  provider: 'gemini'
+  model: string
+  query: string
+  generatedAt: string
+}
 
 export interface EntryData {
   text: string
@@ -13,7 +34,33 @@ export interface EntryData {
   tags: string[]
   notes: string
   practiceEnabled: boolean
+  // Optional so existing version-1 backups and Drive batches remain valid.
+  partOfSpeech?: string
+  pronunciation?: string
+  pronunciationUk?: string
+  pronunciationUs?: string
+  medium?: UsageMedium
+  domain?: string
+  examples?: UsageExample[]
+  spokenVersion?: string
+  writtenVersion?: string
+  alternatives?: TranslationAlternative[]
+  source?: EntrySource
+  collection?: 'library' | 'revisit'
+  capture?: {
+    text: string
+    context: string
+    url: string
+    title: string
+    capturedAt: string
+  }
 }
+
+// Missing collection means Library for existing backups and synced entries.
+export const isRevisitEntry = (data: EntryData) => data.collection === 'revisit'
+
+export const entryCategory = (kind: EntryKind): EntryCategory =>
+  kind === 'sentence' ? 'sentences' : 'expressions'
 
 export interface EntryOperation {
   schemaVersion: 1
@@ -68,6 +115,16 @@ export const emptyEntry = (): EntryData => ({
   tags: [],
   notes: '',
   practiceEnabled: false,
+  partOfSpeech: '',
+  pronunciation: '',
+  pronunciationUk: '',
+  pronunciationUs: '',
+  medium: 'both',
+  domain: '',
+  examples: [],
+  spokenVersion: '',
+  writtenVersion: '',
+  alternatives: [],
 })
 
 export const newEntryOperation = (

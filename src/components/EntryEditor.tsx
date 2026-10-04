@@ -1,17 +1,24 @@
 import { useState, type FormEvent } from 'react'
-import { emptyEntry, type EntryData, type EntryView } from '../domain/model'
+import {
+  emptyEntry,
+  type EntryData,
+  type EntryView,
+  type TranslationAlternative,
+} from '../domain/model'
 
 interface Props {
   entry?: EntryView
   initialText?: string
-  onSave: (value: EntryData, original?: EntryView) => Promise<void>
+  initialData?: EntryData
+  onSave: (value: EntryData, original?: EntryView) => Promise<unknown>
   onCancel: () => void
 }
 
-export function EntryEditor({ entry, initialText = '', onSave, onCancel }: Props) {
+export function EntryEditor({ entry, initialText = '', initialData, onSave, onCancel }: Props) {
   const [data, setData] = useState<EntryData>(
     () =>
-      entry?.data ?? {
+      entry?.data ??
+      initialData ?? {
         ...emptyEntry(),
         text: initialText,
         kind: /[.!?]$/.test(initialText.trim())
@@ -25,9 +32,28 @@ export function EntryEditor({ entry, initialText = '', onSave, onCancel }: Props
   const [error, setError] = useState('')
   const update = <K extends keyof EntryData>(key: K, value: EntryData[K]) =>
     setData((current) => ({ ...current, [key]: value }))
+  const updateAlternative = (index: number, fields: Partial<TranslationAlternative>) =>
+    setData((current) => ({
+      ...current,
+      alternatives: (current.alternatives ?? []).map((item, itemIndex) =>
+        itemIndex === index ? { ...item, ...fields } : item,
+      ),
+    }))
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (!data.text.trim()) return setError('Add the English text first.')
+    const alternatives = (data.alternatives ?? [])
+      .map((alternative) => ({
+        ...alternative,
+        en: alternative.en.trim(),
+        contextZh: alternative.contextZh.trim(),
+        meaningNotesZh: alternative.meaningNotesZh.trim(),
+      }))
+      .filter(
+        (alternative) => alternative.en || alternative.contextZh || alternative.meaningNotesZh,
+      )
+    if (alternatives.some((alternative) => !alternative.en))
+      return setError('Add English text for each alternative, or remove the empty option.')
     setSaving(true)
     setError('')
     try {
@@ -35,7 +61,10 @@ export function EntryEditor({ entry, initialText = '', onSave, onCancel }: Props
         {
           ...data,
           text: data.text.trim(),
+          pronunciationUk: data.pronunciationUk?.trim(),
+          pronunciationUs: data.pronunciationUs?.trim(),
           tags: data.tags.map((tag) => tag.trim()).filter(Boolean),
+          alternatives,
         },
         entry,
       )
@@ -50,7 +79,9 @@ export function EntryEditor({ entry, initialText = '', onSave, onCancel }: Props
       <div className="editor-heading">
         <div>
           <span className="eyebrow">YOUR COLLECTION</span>
-          <h2>{entry ? 'Edit this entry' : 'A new entry'}</h2>
+          <h2>
+            {entry ? 'Edit this entry' : initialData?.source ? 'Edit AI response' : 'A new entry'}
+          </h2>
         </div>
         <button type="button" className="icon-button" onClick={onCancel} aria-label="Close editor">
           ×
@@ -115,6 +146,87 @@ export function EntryEditor({ entry, initialText = '', onSave, onCancel }: Props
           />
         </label>
         <label className="field">
+          Part of speech
+          <input
+            value={data.partOfSpeech ?? ''}
+            maxLength={500}
+            onChange={(e) => update('partOfSpeech', e.target.value)}
+            placeholder="Noun, adjective, phrasal verb…"
+          />
+        </label>
+        <label className="field">
+          British pronunciation (IPA)
+          <input
+            value={data.pronunciationUk ?? ''}
+            maxLength={500}
+            onChange={(e) => update('pronunciationUk', e.target.value)}
+            placeholder="British IPA in /slashes/"
+          />
+        </label>
+        <label className="field">
+          American pronunciation (IPA)
+          <input
+            value={data.pronunciationUs ?? ''}
+            maxLength={500}
+            onChange={(e) => update('pronunciationUs', e.target.value)}
+            placeholder="American IPA in /slashes/"
+          />
+        </label>
+        {(entry?.data.pronunciation || initialData?.pronunciation) && (
+          <label className="field">
+            Existing pronunciation
+            <input
+              value={data.pronunciation ?? ''}
+              maxLength={500}
+              onChange={(e) => update('pronunciation', e.target.value)}
+            />
+            <span className="field-hint">Original note; edit UK/US IPA in the fields above.</span>
+          </label>
+        )}
+        <label className="field">
+          Usually used in
+          <select
+            value={data.medium ?? ''}
+            onChange={(e) =>
+              update('medium', e.target.value ? (e.target.value as EntryData['medium']) : undefined)
+            }
+          >
+            <option value="">Not classified</option>
+            <option value="both">Speaking & writing</option>
+            <option value="spoken">Speaking</option>
+            <option value="written">Writing</option>
+          </select>
+        </label>
+        <label className="field">
+          Domain
+          <input
+            value={data.domain ?? ''}
+            maxLength={500}
+            onChange={(e) => update('domain', e.target.value)}
+            placeholder="Everyday, business, academic…"
+          />
+        </label>
+        <label className="field full">
+          Spoken version
+          <textarea
+            rows={2}
+            maxLength={5000}
+            value={data.spokenVersion ?? ''}
+            onChange={(e) => update('spokenVersion', e.target.value)}
+            placeholder="A natural way to say it in conversation, if applicable"
+          />
+        </label>
+        <label className="field full">
+          Written version
+          <textarea
+            rows={2}
+            maxLength={5000}
+            value={data.writtenVersion ?? ''}
+            onChange={(e) => update('writtenVersion', e.target.value)}
+            placeholder="A natural version for writing, if applicable"
+          />
+        </label>
+        <label className="field">
           Register / setting
           <input
             value={data.register}
@@ -147,6 +259,146 @@ export function EntryEditor({ entry, initialText = '', onSave, onCancel }: Props
             placeholder="What will help you remember it?"
           />
         </label>
+      </div>
+      <div className="example-editor">
+        <div className="example-editor-heading">
+          <strong>Contextual alternatives</strong>
+          <button
+            type="button"
+            className="text-button"
+            disabled={(data.alternatives?.length ?? 0) >= 10}
+            onClick={() =>
+              update('alternatives', [
+                ...(data.alternatives ?? []),
+                { en: '', contextZh: '', medium: 'both', meaningNotesZh: '' },
+              ])
+            }
+          >
+            + Add alternative
+          </button>
+        </div>
+        {(data.alternatives ?? []).map((alternative, index) => (
+          <div className="example-fields" key={index}>
+            <label className="field">
+              English alternative {index + 1}
+              <textarea
+                rows={2}
+                maxLength={5000}
+                value={alternative.en}
+                onChange={(e) => updateAlternative(index, { en: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              Context & tone {index + 1} · 语境与语气
+              <textarea
+                rows={2}
+                maxLength={1000}
+                value={alternative.contextZh}
+                onChange={(e) => updateAlternative(index, { contextZh: e.target.value })}
+                placeholder="适合什么场合？语气、正式程度或强调什么？"
+              />
+            </label>
+            <label className="field">
+              Used in alternative {index + 1}
+              <select
+                value={alternative.medium}
+                onChange={(e) =>
+                  updateAlternative(index, {
+                    medium: e.target.value as TranslationAlternative['medium'],
+                  })
+                }
+              >
+                <option value="both">Speaking & writing</option>
+                <option value="spoken">Speaking</option>
+                <option value="written">Writing</option>
+              </select>
+            </label>
+            <label className="field">
+              Meaning differences {index + 1} · 含义差别
+              <textarea
+                rows={2}
+                maxLength={1000}
+                value={alternative.meaningNotesZh}
+                onChange={(e) => updateAlternative(index, { meaningNotesZh: e.target.value })}
+                placeholder="与原意相比有什么变化？没有则留空。"
+              />
+            </label>
+            <button
+              type="button"
+              className="text-button danger"
+              aria-label={`Remove alternative ${index + 1}`}
+              onClick={() =>
+                update(
+                  'alternatives',
+                  data.alternatives!.filter((_, itemIndex) => itemIndex !== index),
+                )
+              }
+            >
+              Remove alternative
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="example-editor">
+        <div className="example-editor-heading">
+          <strong>Usage examples</strong>
+          <button
+            type="button"
+            className="text-button"
+            disabled={(data.examples?.length ?? 0) >= 10}
+            onClick={() => update('examples', [...(data.examples ?? []), { en: '', zh: '' }])}
+          >
+            + Add example
+          </button>
+        </div>
+        {(data.examples ?? []).map((example, index) => (
+          <div className="example-fields" key={index}>
+            <label className="field">
+              English example {index + 1}
+              <textarea
+                rows={2}
+                maxLength={5000}
+                value={example.en}
+                onChange={(e) =>
+                  update(
+                    'examples',
+                    data.examples!.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, en: e.target.value } : item,
+                    ),
+                  )
+                }
+              />
+            </label>
+            <label className="field">
+              Chinese translation {index + 1}
+              <textarea
+                rows={2}
+                maxLength={5000}
+                value={example.zh}
+                onChange={(e) =>
+                  update(
+                    'examples',
+                    data.examples!.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, zh: e.target.value } : item,
+                    ),
+                  )
+                }
+              />
+            </label>
+            <button
+              type="button"
+              className="text-button danger"
+              onClick={() =>
+                update(
+                  'examples',
+                  data.examples!.filter((_, itemIndex) => itemIndex !== index),
+                )
+              }
+            >
+              Remove example
+            </button>
+          </div>
+        ))}
       </div>
       <button
         type="button"

@@ -21,7 +21,51 @@ export function isEntryData(value: unknown): value is EntryData {
     shortString(value.toneNotes) &&
     strArray(value.tags) &&
     shortString(value.notes) &&
-    typeof value.practiceEnabled === 'boolean'
+    typeof value.practiceEnabled === 'boolean' &&
+    (value.collection === undefined || ['library', 'revisit'].includes(value.collection as string)) &&
+    (value.capture === undefined ||
+      (record(value.capture) &&
+        shortString(value.capture.text, 5000) && !!value.capture.text.trim() &&
+        shortString(value.capture.context, 5000) &&
+        shortString(value.capture.url, 2000) &&
+        /^https?:\/\//i.test(value.capture.url) &&
+        shortString(value.capture.title, 500) &&
+        shortString(value.capture.capturedAt, 40) &&
+        Number.isFinite(Date.parse(value.capture.capturedAt)))) &&
+    ['partOfSpeech', 'pronunciation', 'pronunciationUk', 'pronunciationUs', 'domain'].every(
+      (key) => value[key] === undefined || shortString(value[key], 500),
+    ) &&
+    ['spokenVersion', 'writtenVersion'].every(
+      (key) => value[key] === undefined || shortString(value[key], 5000),
+    ) &&
+    (value.medium === undefined ||
+      ['spoken', 'written', 'both'].includes(value.medium as string)) &&
+    (value.examples === undefined ||
+      (Array.isArray(value.examples) &&
+        value.examples.length <= 10 &&
+        value.examples.every(
+          (example) =>
+            record(example) && shortString(example.en, 5000) && shortString(example.zh, 5000),
+        ))) &&
+    (value.alternatives === undefined ||
+      (Array.isArray(value.alternatives) &&
+        value.alternatives.length <= 10 &&
+        value.alternatives.every(
+          (alternative) =>
+            record(alternative) &&
+            shortString(alternative.en, 5000) &&
+            !!alternative.en.trim() &&
+            shortString(alternative.contextZh, 1000) &&
+            shortString(alternative.meaningNotesZh, 1000) &&
+            ['spoken', 'written', 'both'].includes(alternative.medium as string),
+        ))) &&
+    (value.source === undefined ||
+      (record(value.source) &&
+        value.source.provider === 'gemini' &&
+        shortString(value.source.model, 100) &&
+        shortString(value.source.query, 5000) &&
+        shortString(value.source.generatedAt, 40) &&
+        Number.isFinite(Date.parse(value.source.generatedAt))))
   )
 }
 

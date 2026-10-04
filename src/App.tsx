@@ -1,14 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { EntryEditor } from './components/EntryEditor'
+import { AIQuery } from './components/AIQuery'
+import { GeminiSettings } from './components/GeminiSettings'
+import { TranslationAlternatives } from './components/TranslationAlternatives'
+import { EntryPronunciation } from './components/EntryPronunciation'
+import { LibraryUsageFilter } from './components/LibraryUsageFilter'
 import {
   deriveLibrary,
+  entryCategory,
   newEntryOperation,
   newReviewOperation,
   type EntryData,
   type EntryOperation,
   type EntryView,
   type RatingValue,
+  type EntryCategory,
 } from './domain/model'
+import { filterLibraryEntries, normalizeQuery, type UsageFilter } from './domain/search'
+import { resolveQuery } from './ai/lookup'
 import { isDue, nextDueAt } from './domain/review'
 import { parseOperations } from './domain/validation'
 import {
@@ -17,6 +26,7 @@ import {
   bindSubject,
   getBoundSubject,
   getDeviceId,
+  getGeminiKey,
   getLastSyncedAt,
   getOperations,
   getPendingOperations,
@@ -38,26 +48,75 @@ function dateLabel(value?: string | Date | null) {
   )
 }
 
-function EntryCard({
+export function EntryCard({
   entry,
   onEdit,
   onDelete,
+  draft = false,
 }: {
-  entry: EntryView
-  onEdit: () => void
-  onDelete: () => void
+  entry: { data: EntryData; updatedAt?: string }
+  onEdit?: () => void
+  onDelete?: () => void
+  draft?: boolean
 }) {
+  const optionTexts = new Set(
+    (entry.data.alternatives ?? []).map((alternative) => normalizeQuery(alternative.en)),
+  )
+  const showSpoken =
+    entry.data.spokenVersion && !optionTexts.has(normalizeQuery(entry.data.spokenVersion))
+  const showWritten =
+    entry.data.writtenVersion && !optionTexts.has(normalizeQuery(entry.data.writtenVersion))
   return (
     <article className="entry-card">
       <div className="entry-top">
         <span className="type-label">{entry.data.kind}</span>
-        <span className="muted small">{dateLabel(entry.updatedAt)}</span>
+        <span className="muted small">{draft ? 'Not saved' : dateLabel(entry.updatedAt)}</span>
       </div>
       <h3>{entry.data.text}</h3>
+      {entry.data.partOfSpeech && <p className="lexical-meta">{entry.data.partOfSpeech}</p>}
+      <EntryPronunciation data={entry.data} />
       {entry.data.meaningZh && <p className="meaning">{entry.data.meaningZh}</p>}
+      {entry.data.definitionEn && <p className="definition">{entry.data.definitionEn}</p>}
+      <TranslationAlternatives alternatives={entry.data.alternatives} />
+      {(showSpoken || showWritten) && (
+        <div className="entry-versions">
+          {showSpoken && (
+            <div>
+              <span>Spoken</span>
+              <p>{entry.data.spokenVersion}</p>
+            </div>
+          )}
+          {showWritten && (
+            <div>
+              <span>Written</span>
+              <p>{entry.data.writtenVersion}</p>
+            </div>
+          )}
+        </div>
+      )}
       {entry.data.context && <p className="context">“{entry.data.context}”</p>}
-      {(entry.data.usage || entry.data.register || entry.data.toneNotes || entry.data.notes) && (
+      {(entry.data.usage ||
+        entry.data.register ||
+        entry.data.toneNotes ||
+        entry.data.notes ||
+        entry.data.medium ||
+        entry.data.domain) && (
         <div className="entry-detail">
+          {entry.data.medium && (
+            <p>
+              <b>Used in</b>{' '}
+              {entry.data.medium === 'both'
+                ? 'Speaking & writing'
+                : entry.data.medium === 'spoken'
+                  ? 'Speaking'
+                  : 'Writing'}
+            </p>
+          )}
+          {entry.data.domain && (
+            <p>
+              <b>Domain</b> {entry.data.domain}
+            </p>
+          )}
           {entry.data.usage && (
             <p>
               <b>Usage</b> {entry.data.usage}
@@ -80,6 +139,26 @@ function EntryCard({
           )}
         </div>
       )}
+      {!!entry.data.examples?.length && (
+        <div className="entry-examples">
+          <b>Examples</b>
+          {entry.data.examples.map((example, index) => (
+            <div key={index}>
+              <p>{example.en}</p>
+              {example.zh && <p lang="zh">{example.zh}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+      {entry.data.source && (
+        <details className="entry-source">
+          <summary>AI generated · Gemini</summary>
+          <p>Original query: {entry.data.source.query}</p>
+          <p>
+            {entry.data.source.model} · {dateLabel(entry.data.source.generatedAt)}
+          </p>
+        </details>
+      )}
       {entry.data.tags.length > 0 && (
         <div className="tags">
           {entry.data.tags.map((tag, index) => (
@@ -89,15 +168,21 @@ function EntryCard({
           ))}
         </div>
       )}
-      <div className="card-actions">
-        <button className="text-button" onClick={onEdit}>
-          Edit
-        </button>
-        <button className="text-button danger" onClick={onDelete}>
-          Delete
-        </button>
-        {entry.data.practiceEnabled && <span className="practice-mark">● In review</span>}
-      </div>
+      {!draft && (
+        <div className="card-actions">
+          {onEdit && (
+            <button className="text-button" onClick={onEdit}>
+              Edit
+            </button>
+          )}
+          {onDelete && (
+            <button className="text-button danger" onClick={onDelete}>
+              Delete
+            </button>
+          )}
+          {entry.data.practiceEnabled && <span className="practice-mark">● In review</span>}
+        </div>
+      )}
     </article>
   )
 }
@@ -117,7 +202,9 @@ export default function App() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
-  const [capture, setCapture] = useState('')
+  const [category, setCategory] = useState<EntryCategory>('expressions')
+  const [usageFilter, setUsageFilter] = useState<UsageFilter>('all')
+  const [geminiKey, setGeminiKey] = useState('')
   const [editor, setEditor] = useState<EditorState>(null)
   const [revealed, setRevealed] = useState(false)
   const [reviewIndex, setReviewIndex] = useState(0)
@@ -139,10 +226,11 @@ export default function App() {
 
   useEffect(() => {
     if (CLIENT_ID) void prepareGoogle().catch(() => undefined)
-    Promise.all([getDeviceId(), getBoundSubject(), refresh()])
-      .then(([device, subject]) => {
+    Promise.all([getDeviceId(), getBoundSubject(), getGeminiKey(), refresh()])
+      .then(([device, subject, key]) => {
         setDeviceId(device)
         setBoundSubject(subject)
+        setGeminiKey(key)
         setLocked(!!subject)
         setReady(true)
       })
@@ -163,21 +251,11 @@ export default function App() {
       ),
     [library],
   )
-  const filtered = useMemo(() => {
-    const term = query.trim().toLocaleLowerCase()
-    if (!term) return library.entries
-    return library.entries.filter((entry) =>
-      [
-        entry.data.text,
-        entry.data.meaningZh,
-        entry.data.definitionEn,
-        entry.data.context,
-        entry.data.usage,
-        entry.data.notes,
-        ...entry.data.tags,
-      ].some((part) => part.toLocaleLowerCase().includes(term)),
-    )
-  }, [library.entries, query])
+  const filtered = useMemo(
+    () => filterLibraryEntries(library.entries, query, usageFilter),
+    [library.entries, query, usageFilter],
+  )
+  const categoryEntries = filtered.filter((entry) => entryCategory(entry.data.kind) === category)
   const currentReview = due[reviewIndex % Math.max(1, due.length)]
 
   const runSync = useCallback(
@@ -225,14 +303,30 @@ export default function App() {
   }, [runSync])
 
   async function saveEntry(value: EntryData, original?: EntryView) {
+    if (!deviceId) throw new Error('Device storage is not ready. Reload before saving.')
     const id = original?.id ?? crypto.randomUUID()
     const op = newEntryOperation(id, original ? [original.revision] : [], value, deviceId)
     await addLocalOperation(op)
     await refresh()
     setEditor(null)
-    setCapture('')
     setMessage('Saved on this device.')
     queueSync()
+    return { id, revision: op.id, updatedAt: op.at, data: value }
+  }
+
+  async function saveGeneratedEntry(value: EntryData): Promise<EntryView> {
+    // Re-read after the network request: another save or sync may have added it.
+    const current = await getOperations()
+    const byQuery = await resolveQuery(
+      value.source?.query ?? value.text,
+      current,
+      async () => value,
+      true,
+    )
+    if (byQuery.source === 'saved') return byQuery.entries[0]
+    const byText = await resolveQuery(value.text, current, async () => value, true)
+    if (byText.source === 'saved') return byText.entries[0]
+    return saveEntry(value)
   }
 
   async function removeEntry(entry: EntryView) {
@@ -410,7 +504,7 @@ export default function App() {
         <nav className="nav" aria-label="Main navigation">
           {(
             [
-              ['lookup', '✦', 'Capture'],
+              ['lookup', '✦', 'Home'],
               ['library', '▤', 'Library'],
               ['review', '◷', 'Review'],
               ['settings', '⚙', 'Settings'],
@@ -478,43 +572,35 @@ export default function App() {
               <section className="hero">
                 <span className="eyebrow">A QUIETER WAY TO LEARN</span>
                 <h1>
-                  Words worth
+                  English worth
                   <br />
-                  <i>keeping.</i>
+                  <i>keeping growing.</i>
                 </h1>
                 <p>
-                  Catch the language you meet every day. Add the meaning that matters to you, then
-                  revisit it when you’re ready.
+                  Find the right expression. Explore its meaning, or turn a Chinese thought into
+                  natural English. Keep it here for next time.
                 </p>
               </section>
-              <section className="capture-panel">
-                <div className="section-kicker">
-                  <span className="kicker-symbol">✦</span> START HERE
-                </div>
-                <h2>What would you like to remember?</h2>
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault()
-                    if (capture.trim()) setEditor({ initialText: capture.trim() })
-                  }}
-                >
-                  <div className="capture-input">
-                    <input
-                      aria-label="English text to save"
-                      value={capture}
-                      onChange={(event) => setCapture(event.target.value)}
-                      placeholder="Type a word, phrase, or sentence…"
+              <AIQuery
+                apiKey={geminiKey}
+                enabled={!!deviceId}
+                onSave={saveGeneratedEntry}
+                onManual={(text) => setEditor({ initialText: text })}
+                onSettings={() => setPage('settings')}
+                renderDraft={(data) => <EntryCard entry={{ data }} draft />}
+                renderEntry={(result) => {
+                  const entry = library.entries.find((item) => item.id === result.id)
+                  return entry ? (
+                    <EntryCard
+                      entry={entry}
+                      onEdit={() => setEditor({ entry })}
+                      onDelete={() => void removeEntry(entry)}
                     />
-                    <button className="button primary" disabled={!capture.trim()}>
-                      Add entry <span aria-hidden="true">↗</span>
-                    </button>
-                  </div>
-                </form>
-                <p className="helper">
-                  Dictionary lookup is coming later. For now, save your own meaning, context, and
-                  notes.
-                </p>
-              </section>
+                  ) : (
+                    <p className="helper">This entry is no longer in the library.</p>
+                  )
+                }}
+              />
               <section className="overview">
                 <div className="overview-card">
                   <span>YOUR COLLECTION</span>
@@ -578,15 +664,38 @@ export default function App() {
                   + New entry
                 </button>
               </div>
+              <div className="library-filters">
+                <div className="category-tabs" role="group" aria-label="Library category">
+                  {(
+                    [
+                      ['expressions', 'Words & phrases'],
+                      ['sentences', 'Sentences'],
+                    ] as const
+                  ).map(([name, label]) => (
+                    <button
+                      key={name}
+                      className={category === name ? 'active' : ''}
+                      aria-pressed={category === name}
+                      onClick={() => setCategory(name)}
+                    >
+                      {label}
+                      <span>
+                        {filtered.filter((entry) => entryCategory(entry.data.kind) === name).length}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <LibraryUsageFilter value={usageFilter} onChange={setUsageFilter} />
+              </div>
               {library.conflicts.length > 0 && (
                 <div className="notice">
                   {library.conflicts.length} entry conflict
                   {library.conflicts.length === 1 ? '' : 's'} need your choice in Settings.
                 </div>
               )}
-              {filtered.length ? (
+              {categoryEntries.length ? (
                 <div className="entry-grid">
-                  {filtered.map((entry) => (
+                  {categoryEntries.map((entry) => (
                     <EntryCard
                       key={entry.id}
                       entry={entry}
@@ -598,20 +707,27 @@ export default function App() {
               ) : (
                 <div className="empty-state">
                   <div className="empty-icon">Aa</div>
-                  <h2>{query ? 'No matching entries' : 'Your library starts here'}</h2>
+                  <h2>
+                    {query.trim() || usageFilter !== 'all'
+                      ? 'No entries match these filters'
+                      : category === 'sentences'
+                        ? 'Your sentences start here'
+                        : 'Your words & phrases start here'}
+                  </h2>
                   <p>
-                    {query
-                      ? 'Try another word or search your notes.'
-                      : 'Save a word, phrase, or sentence you want to remember.'}
+                    {query.trim() || usageFilter !== 'all'
+                      ? 'Try another search, usage filter, or category.'
+                      : 'Look up something new on the homepage, or add an entry manually.'}
                   </p>
                   <button
                     className="button secondary"
                     onClick={() => {
-                      setPage('lookup')
                       setQuery('')
+                      setUsageFilter('all')
+                      if (!query.trim() && usageFilter === 'all') setPage('lookup')
                     }}
                   >
-                    Capture something
+                    {query.trim() || usageFilter !== 'all' ? 'Clear filters' : 'Look up something'}
                   </button>
                 </div>
               )}
@@ -692,6 +808,7 @@ export default function App() {
                 </p>
               </div>
               <div className="settings-grid">
+                <GeminiSettings apiKey={geminiKey} onChange={setGeminiKey} />
                 <section className="settings-card">
                   <span className="eyebrow">CROSS-DEVICE</span>
                   <h2>Google Drive</h2>
@@ -830,7 +947,7 @@ export default function App() {
       <nav className="mobile-nav" aria-label="Mobile navigation">
         {(
           [
-            ['lookup', '✦', 'Capture'],
+            ['lookup', '✦', 'Home'],
             ['library', '▤', 'Library'],
             ['review', '◷', 'Review'],
             ['settings', '⚙', 'Settings'],

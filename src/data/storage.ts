@@ -66,6 +66,17 @@ export async function addLocalOperation(op: Operation): Promise<void> {
   await (await db()).add('operations', { id: op.id, op, uploaded: false })
 }
 
+// Credentials stay in device metadata, outside the operation log, Drive, and backups.
+export async function getGeminiKey(): Promise<string> {
+  return (await (await db()).get('meta', 'geminiApiKey')) ?? ''
+}
+
+export async function setGeminiKey(key: string): Promise<void> {
+  const store = await db()
+  if (key.trim()) await store.put('meta', key.trim(), 'geminiApiKey')
+  else await store.delete('meta', 'geminiApiKey')
+}
+
 export async function addImportedOperations(ops: Operation[]): Promise<number> {
   const store = await db()
   // Check the entire import before opening a write transaction so a duplicate
