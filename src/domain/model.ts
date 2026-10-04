@@ -44,6 +44,7 @@ export interface EntryData {
   examples?: UsageExample[]
   spokenVersion?: string
   writtenVersion?: string
+  sharedVersion?: string
   alternatives?: TranslationAlternative[]
   source?: EntrySource
   collection?: 'library' | 'revisit'
@@ -124,6 +125,7 @@ export const emptyEntry = (): EntryData => ({
   examples: [],
   spokenVersion: '',
   writtenVersion: '',
+  sharedVersion: '',
   alternatives: [],
 })
 

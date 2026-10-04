@@ -4,9 +4,18 @@ import { AIQuery } from './components/AIQuery'
 import { GeminiSettings } from './components/GeminiSettings'
 import { TranslationAlternatives } from './components/TranslationAlternatives'
 import { EntryPronunciation } from './components/EntryPronunciation'
+import { EntryVersions } from './components/EntryVersions'
 import { LibraryUsageFilter } from './components/LibraryUsageFilter'
 import {
+  LibraryCompactEntry,
+  LibraryDisplayOptions,
+  readLibraryView,
+  rememberLibraryView,
+  type LibraryViewMode,
+} from './components/LibraryDisplay'
+import {
   deriveLibrary,
+  isRevisitEntry,
   entryCategory,
   newEntryOperation,
   newReviewOperation,
@@ -16,13 +25,15 @@ import {
   type RatingValue,
   type EntryCategory,
 } from './domain/model'
-import { filterLibraryEntries, normalizeQuery, type UsageFilter } from './domain/search'
+import { filterLibraryEntries, type UsageFilter } from './domain/search'
+import { entryVersions, normalizeSentenceVersions, versionTextKey } from './domain/sentenceVersions'
 import { resolveQuery } from './ai/lookup'
 import { isDue, nextDueAt } from './domain/review'
 import { parseOperations } from './domain/validation'
 import {
   addImportedOperations,
   addLocalOperation,
+  addLocalOperationOnce,
   bindSubject,
   getBoundSubject,
   getDeviceId,
@@ -30,12 +41,18 @@ import {
   getLastSyncedAt,
   getOperations,
   getPendingOperations,
+  repairSentenceVersions,
+  subscribeToChanges,
 } from './data/storage'
 import { connectGoogle, prepareGoogle, type GoogleConnection } from './google/auth'
 import { syncDrive } from './google/drive'
+import { lookupGemini, LOCAL_GEMINI_PROXY } from './ai/client'
+import { createCaptureService } from './capture/service'
+import { listenForCapture } from './capture/bridge'
+import { Revisit } from './components/Revisit'
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
-type Page = 'lookup' | 'library' | 'review' | 'settings'
+type Page = 'lookup' | 'library' | 'revisit' | 'review' | 'settings'
 type EditorState = { entry?: EntryView; initialText?: string } | null
 
 function errorText(value: unknown) {
@@ -59,42 +76,56 @@ export function EntryCard({
   onDelete?: () => void
   draft?: boolean
 }) {
-  const optionTexts = new Set(
-    (entry.data.alternatives ?? []).map((alternative) => normalizeQuery(alternative.en)),
+  const data = normalizeSentenceVersions(entry.data)
+  const canonicalInVersions = entryVersions(data).some(
+    (version) => versionTextKey(version.text) === versionTextKey(data.text),
   )
-  const showSpoken =
-    entry.data.spokenVersion && !optionTexts.has(normalizeQuery(entry.data.spokenVersion))
-  const showWritten =
-    entry.data.writtenVersion && !optionTexts.has(normalizeQuery(entry.data.writtenVersion))
+  const canonicalInAlternatives = (data.alternatives ?? []).some(
+    (option) => versionTextKey(option.en) === versionTextKey(data.text),
+  )
   return (
     <article className="entry-card">
       <div className="entry-top">
-        <span className="type-label">{entry.data.kind}</span>
+        <span className="type-label">
+          {entry.data.kind}
+          {isRevisitEntry(entry.data) ? ' · Revisit' : ''}
+        </span>
         <span className="muted small">{draft ? 'Not saved' : dateLabel(entry.updatedAt)}</span>
       </div>
-      <h3>{entry.data.text}</h3>
+      {entry.data.kind === 'sentence' && entry.data.meaningZh ? (
+        <>
+          <h3 lang="zh">{entry.data.meaningZh}</h3>
+          {!canonicalInVersions && !canonicalInAlternatives && (
+            <p className="sentence-english" lang="en">
+              {entry.data.text}
+            </p>
+          )}
+        </>
+      ) : (
+        <h3 lang="en">{entry.data.text}</h3>
+      )}
       {entry.data.partOfSpeech && <p className="lexical-meta">{entry.data.partOfSpeech}</p>}
       <EntryPronunciation data={entry.data} />
-      {entry.data.meaningZh && <p className="meaning">{entry.data.meaningZh}</p>}
-      {entry.data.definitionEn && <p className="definition">{entry.data.definitionEn}</p>}
-      <TranslationAlternatives alternatives={entry.data.alternatives} />
-      {(showSpoken || showWritten) && (
-        <div className="entry-versions">
-          {showSpoken && (
-            <div>
-              <span>Spoken</span>
-              <p>{entry.data.spokenVersion}</p>
-            </div>
-          )}
-          {showWritten && (
-            <div>
-              <span>Written</span>
-              <p>{entry.data.writtenVersion}</p>
-            </div>
-          )}
-        </div>
+      {entry.data.kind !== 'sentence' && entry.data.meaningZh && (
+        <p className="meaning" lang="zh">
+          {entry.data.meaningZh}
+        </p>
       )}
+      {entry.data.definitionEn && <p className="definition">{entry.data.definitionEn}</p>}
+      <TranslationAlternatives alternatives={data.alternatives} />
+      <EntryVersions
+        data={data}
+        canonicalAlreadyVisible={data.kind !== 'sentence' || !data.meaningZh}
+      />
       {entry.data.context && <p className="context">“{entry.data.context}”</p>}
+      {entry.data.capture && (
+        <p className="capture-source">
+          From{' '}
+          <a href={entry.data.capture.url} target="_blank" rel="noopener noreferrer">
+            {entry.data.capture.title || new URL(entry.data.capture.url).hostname}
+          </a>
+        </p>
+      )}
       {(entry.data.usage ||
         entry.data.register ||
         entry.data.toneNotes ||
@@ -144,8 +175,9 @@ export function EntryCard({
           <b>Examples</b>
           {entry.data.examples.map((example, index) => (
             <div key={index}>
-              <p>{example.en}</p>
-              {example.zh && <p lang="zh">{example.zh}</p>}
+              {entry.data.kind === 'sentence' && example.zh && <p lang="zh">{example.zh}</p>}
+              <p lang="en">{example.en}</p>
+              {entry.data.kind !== 'sentence' && example.zh && <p lang="zh">{example.zh}</p>}
             </div>
           ))}
         </div>
@@ -188,7 +220,9 @@ export function EntryCard({
 }
 
 export default function App() {
-  const [page, setPage] = useState<Page>('lookup')
+  const [page, setPage] = useState<Page>(() =>
+    new URLSearchParams(window.location.search).get('view') === 'revisit' ? 'revisit' : 'lookup',
+  )
   const [operations, setOperations] = useState<Awaited<ReturnType<typeof getOperations>>>([])
   const [ready, setReady] = useState(false)
   const [deviceId, setDeviceId] = useState('')
@@ -204,6 +238,7 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<EntryCategory>('expressions')
   const [usageFilter, setUsageFilter] = useState<UsageFilter>('all')
+  const [libraryView, setLibraryView] = useState<LibraryViewMode>(readLibraryView)
   const [geminiKey, setGeminiKey] = useState('')
   const [editor, setEditor] = useState<EditorState>(null)
   const [revealed, setRevealed] = useState(false)
@@ -212,8 +247,13 @@ export default function App() {
   const syncBusy = useRef(false)
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const connectionRef = useRef<GoogleConnection | null>(null)
+  const captureState = useRef({ ready, locked, deviceId })
+  captureState.current = { ready, locked, deviceId }
+  const captureChanged = useRef<() => Promise<void>>(async () => {})
+  const afterSentenceRepair = useRef<() => void>(() => {})
 
   const refresh = useCallback(async () => {
+    const repaired = await repairSentenceVersions()
     const [all, pending, synced] = await Promise.all([
       getOperations(),
       getPendingOperations(),
@@ -222,6 +262,12 @@ export default function App() {
     setOperations(all)
     setPendingCount(pending.length)
     setLastSynced(synced)
+    if (repaired) {
+      setMessage(
+        `Combined identical spoken and written versions in ${repaired} saved sentence${repaired === 1 ? '' : 's'}.`,
+      )
+      afterSentenceRepair.current()
+    }
   }, [])
 
   useEffect(() => {
@@ -244,16 +290,21 @@ export default function App() {
   }, [refresh])
 
   const library = useMemo(() => deriveLibrary(operations), [operations])
-  const due = useMemo(
-    () =>
-      library.entries.filter(
-        (entry) => entry.data.practiceEnabled && isDue(entry.id, library.reviews),
-      ),
+  const libraryEntries = useMemo(
+    () => library.entries.filter((entry) => !isRevisitEntry(entry.data)),
     [library],
   )
+  const revisitEntries = library.entries.filter((entry) => isRevisitEntry(entry.data))
+  const due = useMemo(
+    () =>
+      libraryEntries.filter(
+        (entry) => entry.data.practiceEnabled && isDue(entry.id, library.reviews),
+      ),
+    [library, libraryEntries],
+  )
   const filtered = useMemo(
-    () => filterLibraryEntries(library.entries, query, usageFilter),
-    [library.entries, query, usageFilter],
+    () => filterLibraryEntries(libraryEntries, query, usageFilter),
+    [libraryEntries, query, usageFilter],
   )
   const categoryEntries = filtered.filter((entry) => entryCategory(entry.data.kind) === category)
   const currentReview = due[reviewIndex % Math.max(1, due.length)]
@@ -285,14 +336,50 @@ export default function App() {
       if (connectionRef.current) void runSync(connectionRef.current)
     }, 1200)
   }
+  afterSentenceRepair.current = queueSync
+
+  captureChanged.current = async () => {
+    await refresh()
+    queueSync()
+  }
+  useEffect(() => {
+    const service = createCaptureService({
+      state: () => captureState.current,
+      operations: getOperations,
+      generate: async (input, signal) => {
+        const key = await getGeminiKey()
+        if (!LOCAL_GEMINI_PROXY && !key)
+          throw new Error('Add your Gemini API key in MyLexicon Settings first.')
+        if (!navigator.onLine)
+          throw new Error('You are offline. This contextual explanation needs Gemini.')
+        return lookupGemini(input.text, key, signal, { context: input.context })
+      },
+      persist: addLocalOperationOnce,
+      changed: () => captureChanged.current(),
+    })
+    const stop = listenForCapture(service.handle)
+    return () => {
+      stop()
+      service.dispose()
+    }
+  }, [])
+
+  useEffect(
+    () =>
+      subscribeToChanges(() => {
+        void refresh().catch((reason) => setError(errorText(reason)))
+      }),
+    [refresh],
+  )
 
   useEffect(() => {
     const onOnline = () => {
       if (connectionRef.current) void runSync(connectionRef.current)
     }
     const onVisible = () => {
-      if (document.visibilityState === 'visible' && connectionRef.current)
-        void runSync(connectionRef.current)
+      if (document.visibilityState !== 'visible') return
+      if (connectionRef.current) void runSync(connectionRef.current)
+      else void refresh().catch((reason) => setError(errorText(reason)))
     }
     window.addEventListener('online', onOnline)
     document.addEventListener('visibilitychange', onVisible)
@@ -300,18 +387,19 @@ export default function App() {
       window.removeEventListener('online', onOnline)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [runSync])
+  }, [runSync, refresh])
 
   async function saveEntry(value: EntryData, original?: EntryView) {
     if (!deviceId) throw new Error('Device storage is not ready. Reload before saving.')
     const id = original?.id ?? crypto.randomUUID()
-    const op = newEntryOperation(id, original ? [original.revision] : [], value, deviceId)
+    const normalized = normalizeSentenceVersions(value)
+    const op = newEntryOperation(id, original ? [original.revision] : [], normalized, deviceId)
     await addLocalOperation(op)
     await refresh()
     setEditor(null)
     setMessage('Saved on this device.')
     queueSync()
-    return { id, revision: op.id, updatedAt: op.at, data: value }
+    return { id, revision: op.id, updatedAt: op.at, data: normalized }
   }
 
   async function saveGeneratedEntry(value: EntryData): Promise<EntryView> {
@@ -330,12 +418,26 @@ export default function App() {
   }
 
   async function removeEntry(entry: EntryView) {
-    if (!window.confirm(`Delete “${entry.data.text}” from your library?`)) return
+    if (
+      !window.confirm(
+        `Delete “${entry.data.text}” from ${isRevisitEntry(entry.data) ? 'Revisit' : 'your library'}?`,
+      )
+    )
+      return
     try {
       await addLocalOperation(newEntryOperation(entry.id, [entry.revision], null, deviceId))
       await refresh()
       setMessage('Entry deleted on this device.')
       queueSync()
+    } catch (reason) {
+      setError(errorText(reason))
+    }
+  }
+
+  async function finishRevisit(entry: EntryView, practice: boolean) {
+    try {
+      await saveEntry({ ...entry.data, collection: 'library', practiceEnabled: practice }, entry)
+      setMessage(practice ? 'Moved to Library and added to practice.' : 'Moved to Library.')
     } catch (reason) {
       setError(errorText(reason))
     }
@@ -506,6 +608,7 @@ export default function App() {
             [
               ['lookup', '✦', 'Home'],
               ['library', '▤', 'Library'],
+              ['revisit', '↺', 'Revisit'],
               ['review', '◷', 'Review'],
               ['settings', '⚙', 'Settings'],
             ] as const
@@ -522,6 +625,7 @@ export default function App() {
               <span aria-hidden="true">{icon}</span>
               <span>{label}</span>
               {name === 'review' && due.length > 0 && <em>{due.length}</em>}
+              {name === 'revisit' && revisitEntries.length > 0 && <em>{revisitEntries.length}</em>}
             </button>
           ))}
         </nav>
@@ -608,7 +712,7 @@ export default function App() {
                   <p>saved expressions</p>
                 </div>
                 <div className="overview-card accent">
-                  <span>READY TO REVISIT</span>
+                  <span>READY TO PRACTISE</span>
                   <strong>{due.length}</strong>
                   <p>due for review</p>
                 </div>
@@ -620,7 +724,7 @@ export default function App() {
                   <p>{connection ? 'with Google Drive' : 'connect to sync devices'}</p>
                 </div>
               </section>
-              {library.entries.length > 0 && (
+              {libraryEntries.length > 0 && (
                 <section className="recent">
                   <div className="section-heading">
                     <div>
@@ -632,7 +736,7 @@ export default function App() {
                     </button>
                   </div>
                   <div className="entry-grid">
-                    {library.entries.slice(0, 3).map((entry) => (
+                    {libraryEntries.slice(0, 3).map((entry) => (
                       <EntryCard
                         key={entry.id}
                         entry={entry}
@@ -687,6 +791,13 @@ export default function App() {
                 </div>
                 <LibraryUsageFilter value={usageFilter} onChange={setUsageFilter} />
               </div>
+              <LibraryDisplayOptions
+                value={libraryView}
+                onChange={(value) => {
+                  setLibraryView(value)
+                  rememberLibraryView(value)
+                }}
+              />
               {library.conflicts.length > 0 && (
                 <div className="notice">
                   {library.conflicts.length} entry conflict
@@ -694,15 +805,38 @@ export default function App() {
                 </div>
               )}
               {categoryEntries.length ? (
-                <div className="entry-grid">
-                  {categoryEntries.map((entry) => (
-                    <EntryCard
-                      key={entry.id}
-                      entry={entry}
-                      onEdit={() => setEditor({ entry })}
-                      onDelete={() => void removeEntry(entry)}
-                    />
-                  ))}
+                <div
+                  className={
+                    libraryView === 'list'
+                      ? 'library-entry-list'
+                      : libraryView === 'preview'
+                        ? 'entry-grid library-preview-grid'
+                        : 'entry-grid'
+                  }
+                >
+                  {categoryEntries.map((entry) =>
+                    libraryView === 'cards' ? (
+                      <EntryCard
+                        key={`${libraryView}-${entry.id}`}
+                        entry={entry}
+                        onEdit={() => setEditor({ entry })}
+                        onDelete={() => void removeEntry(entry)}
+                      />
+                    ) : (
+                      <LibraryCompactEntry
+                        key={`${libraryView}-${entry.id}`}
+                        entry={entry}
+                        mode={libraryView}
+                        renderFullEntry={(item) => (
+                          <EntryCard
+                            entry={item}
+                            onEdit={() => setEditor({ entry: item })}
+                            onDelete={() => void removeEntry(item)}
+                          />
+                        )}
+                      />
+                    ),
+                  )}
                 </div>
               ) : (
                 <div className="empty-state">
@@ -733,6 +867,16 @@ export default function App() {
               )}
             </>
           )}
+          {page === 'revisit' && (
+            <Revisit
+              entries={revisitEntries}
+              onEdit={(entry) => setEditor({ entry })}
+              onDelete={(entry) => void removeEntry(entry)}
+              onFinish={finishRevisit}
+              renderDetails={(entry) => <EntryCard entry={entry} />}
+              onSettings={() => setPage('settings')}
+            />
+          )}
           {page === 'review' && (
             <>
               <div className="page-heading">
@@ -744,8 +888,7 @@ export default function App() {
                 <span>Due now</span>
                 <strong>{due.length}</strong>
                 <span>
-                  of {library.entries.filter((entry) => entry.data.practiceEnabled).length} in
-                  review
+                  of {libraryEntries.filter((entry) => entry.data.practiceEnabled).length} in review
                 </span>
               </div>
               {currentReview ? (
@@ -809,6 +952,35 @@ export default function App() {
               </div>
               <div className="settings-grid">
                 <GeminiSettings apiKey={geminiKey} onChange={setGeminiKey} />
+                <section className="settings-card">
+                  <span className="eyebrow">KEEP YOUR READING FLOW</span>
+                  <h2>Browser capture</h2>
+                  <p>
+                    Select a word, phrase, or sentence in Chrome or Edge, then use MyLexicon Capture
+                    to see its meaning in Chinese. Keep interesting expressions in Revisit.
+                  </p>
+                  <a
+                    className="button secondary"
+                    href={`${import.meta.env.BASE_URL}mylexicon-capture.zip`}
+                    download
+                  >
+                    Download extension
+                  </a>
+                  <p className="helper">
+                    Unzip the download. In your browser’s Extensions page, enable Developer mode and
+                    choose Load unpacked, selecting the unzipped folder. Open the extension’s
+                    Options and set this service address:
+                  </p>
+                  <code className="service-address">
+                    {window.location.origin}
+                    {import.meta.env.BASE_URL}
+                  </code>
+                  <p className="helper">
+                    Use your existing Gemini setup. The service must be open and unlocked in the
+                    same browser profile; capture can open a background service tab. New
+                    explanations send only your selection and a short surrounding passage to Gemini.
+                  </p>
+                </section>
                 <section className="settings-card">
                   <span className="eyebrow">CROSS-DEVICE</span>
                   <h2>Google Drive</h2>
@@ -949,6 +1121,7 @@ export default function App() {
           [
             ['lookup', '✦', 'Home'],
             ['library', '▤', 'Library'],
+            ['revisit', '↺', 'Revisit'],
             ['review', '◷', 'Review'],
             ['settings', '⚙', 'Settings'],
           ] as const

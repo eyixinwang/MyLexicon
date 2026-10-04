@@ -6,6 +6,15 @@ const shortString = (value: unknown, limit = 20000): value is string =>
   typeof value === 'string' && value.length <= limit
 const strArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.length <= 100 && value.every((part) => shortString(part, 300))
+const sourceUrl = (value: unknown): value is string => {
+  if (!shortString(value, 2000)) return false
+  try {
+    const url = new URL(value)
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
+  } catch {
+    return false
+  }
+}
 
 export function isEntryData(value: unknown): value is EntryData {
   if (!record(value)) return false
@@ -22,20 +31,21 @@ export function isEntryData(value: unknown): value is EntryData {
     strArray(value.tags) &&
     shortString(value.notes) &&
     typeof value.practiceEnabled === 'boolean' &&
-    (value.collection === undefined || ['library', 'revisit'].includes(value.collection as string)) &&
+    (value.collection === undefined ||
+      ['library', 'revisit'].includes(value.collection as string)) &&
     (value.capture === undefined ||
       (record(value.capture) &&
-        shortString(value.capture.text, 5000) && !!value.capture.text.trim() &&
+        shortString(value.capture.text, 5000) &&
+        !!value.capture.text.trim() &&
         shortString(value.capture.context, 5000) &&
-        shortString(value.capture.url, 2000) &&
-        /^https?:\/\//i.test(value.capture.url) &&
+        sourceUrl(value.capture.url) &&
         shortString(value.capture.title, 500) &&
         shortString(value.capture.capturedAt, 40) &&
         Number.isFinite(Date.parse(value.capture.capturedAt)))) &&
     ['partOfSpeech', 'pronunciation', 'pronunciationUk', 'pronunciationUs', 'domain'].every(
       (key) => value[key] === undefined || shortString(value[key], 500),
     ) &&
-    ['spokenVersion', 'writtenVersion'].every(
+    ['spokenVersion', 'writtenVersion', 'sharedVersion'].every(
       (key) => value[key] === undefined || shortString(value[key], 5000),
     ) &&
     (value.medium === undefined ||

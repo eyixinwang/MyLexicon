@@ -46,8 +46,13 @@ function localGeminiProxy(key: string, base: string): Plugin {
           query = validateQuery(parsed.query)
           if ('reading' in parsed && parsed.reading !== undefined) {
             const value = parsed.reading
-            if (typeof value !== 'object' || value === null || !('context' in value) ||
-                typeof value.context !== 'string' || value.context.length > 5000)
+            if (
+              typeof value !== 'object' ||
+              value === null ||
+              !('context' in value) ||
+              typeof value.context !== 'string' ||
+              value.context.length > 5000
+            )
               return reply(400, { error: 'Reading context must be text within 5000 characters.' })
             reading = { context: value.context }
           }

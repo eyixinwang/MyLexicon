@@ -34,6 +34,7 @@ const exactFields = (data: EntryData) => [
   data.meaningZh,
   data.spokenVersion ?? '',
   data.writtenVersion ?? '',
+  data.sharedVersion ?? '',
   data.source?.query ?? '',
   ...(data.alternatives ?? []).map((alternative) => alternative.en),
 ]

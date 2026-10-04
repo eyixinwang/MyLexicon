@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MyLexicon Capture settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <span class="eyebrow">MYLEXICON CAPTURE</span>
+      <h1>Keep your reading rhythm.</h1>
+      <p>
+        Select English text, then right-click and choose <b>Explain in Chinese · MyLexicon</b>,
+        click the extension icon, or press <b>Alt + Shift + L</b> (Option + Shift + L on Mac).
+      </p>
+      <form id="settings">
+        <label for="service">MyLexicon service address</label
+        ><input id="service" type="url" required autocomplete="off" />
+        <p class="hint">
+          Use the hosted MyLexicon address, or http://127.0.0.1:5173/ while developing locally.
+        </p>
+        <button type="submit">Save address</button>
+      </form>
+      <p id="status" role="status"></p>
+      <button id="open" class="secondary">Open MyLexicon</button>
+      <p>
+        Set up Gemini in MyLexicon Settings and open your local library there. Explanations stay
+        temporary until you choose <b>加入 Revisit</b>. Revisit entries sync and export with your
+        existing library.
+      </p>
+      <p class="hint">
+        Only deliberately submitted selections and a short surrounding passage go to Gemini. This
+        extension stores the service address; your API key stays in MyLexicon. Browser internal
+        pages and some embedded documents cannot be captured.
+      </p>
+      <p class="hint">
+        You can change the shortcut on your browser’s extension keyboard-shortcuts page.
+      </p>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

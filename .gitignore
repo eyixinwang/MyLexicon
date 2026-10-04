@@ -10,3 +10,5 @@ coverage/
 *.log
 backups/
 mylexicon-*.json
+public/mylexicon-capture.zip
+artifacts/capture/

@@ -1,5 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { Operation } from '../domain/model'
+import { planSentenceVersionRepairs } from '../domain/sentenceVersions'
 
 interface StoredOperation {
   id: string
@@ -14,6 +15,18 @@ interface LexiconDB extends DBSchema {
 }
 
 let database: Promise<IDBPDatabase<LexiconDB>> | undefined
+function notifyChanged() {
+  if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return
+  const channel = new BroadcastChannel('mylexicon-changes')
+  channel.postMessage('changed')
+  channel.close()
+}
+export function subscribeToChanges(callback: () => void): () => void {
+  if (!('BroadcastChannel' in window)) return () => {}
+  const channel = new BroadcastChannel('mylexicon-changes')
+  channel.onmessage = callback
+  return () => channel.close()
+}
 function db() {
   database ??= openDB<LexiconDB>('mylexicon-v1', 1, {
     upgrade(store) {
@@ -62,8 +75,43 @@ export async function getPendingOperations(): Promise<Operation[]> {
     .map((item) => item.op)
 }
 
+export async function repairSentenceVersions(): Promise<number> {
+  const store = await db()
+  // Read and append in one transaction: simultaneous tabs cannot create sibling repairs.
+  const tx = store.transaction(['operations', 'meta'], 'readwrite')
+  const operationStore = tx.objectStore('operations')
+  const records = await operationStore.getAll()
+  const deviceId = (await tx.objectStore('meta').get('deviceId')) ?? crypto.randomUUID()
+  const repairs = planSentenceVersionRepairs(
+    records.map((record) => record.op),
+    deviceId,
+  )
+  if (repairs.length) {
+    await tx.objectStore('meta').put(deviceId, 'deviceId')
+    for (const op of repairs) await operationStore.add({ id: op.id, op, uploaded: false })
+  }
+  await tx.done
+  if (repairs.length) notifyChanged()
+  return repairs.length
+}
+
 export async function addLocalOperation(op: Operation): Promise<void> {
   await (await db()).add('operations', { id: op.id, op, uploaded: false })
+  notifyChanged()
+}
+
+// A capture save can be retried after its response channel disappears.
+// Check and write in one transaction so retrying never adds another entry.
+export async function addLocalOperationOnce(op: Operation): Promise<void> {
+  const tx = (await db()).transaction('operations', 'readwrite')
+  const existing = await tx.store.get(op.id)
+  if (existing && JSON.stringify(existing.op) !== JSON.stringify(op)) {
+    tx.abort()
+    throw new Error('This capture ID already belongs to a different change.')
+  }
+  if (!existing) await tx.store.add({ id: op.id, op, uploaded: false })
+  await tx.done
+  if (!existing) notifyChanged()
 }
 
 // Credentials stay in device metadata, outside the operation log, Drive, and backups.
@@ -98,6 +146,7 @@ export async function addImportedOperations(ops: Operation[]): Promise<number> {
     }
   }
   await tx.done
+  if (added) notifyChanged()
   return added
 }
 
@@ -120,6 +169,7 @@ export async function addRemoteBatch(fileId: string, ops: Operation[]): Promise<
   }
   await tx.objectStore('seenFiles').put(fileId, fileId)
   await tx.done
+  notifyChanged()
 }
 
 export async function markUploaded(ops: Operation[], fileId: string): Promise<void> {

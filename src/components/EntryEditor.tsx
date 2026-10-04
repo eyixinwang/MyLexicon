@@ -5,6 +5,7 @@ import {
   type EntryView,
   type TranslationAlternative,
 } from '../domain/model'
+import { normalizeSentenceVersions } from '../domain/sentenceVersions'
 
 interface Props {
   entry?: EntryView
@@ -15,18 +16,19 @@ interface Props {
 }
 
 export function EntryEditor({ entry, initialText = '', initialData, onSave, onCancel }: Props) {
-  const [data, setData] = useState<EntryData>(
-    () =>
+  const [data, setData] = useState<EntryData>(() =>
+    normalizeSentenceVersions(
       entry?.data ??
-      initialData ?? {
-        ...emptyEntry(),
-        text: initialText,
-        kind: /[.!?]$/.test(initialText.trim())
-          ? 'sentence'
-          : /\s/.test(initialText.trim())
-            ? 'phrase'
-            : 'word',
-      },
+        initialData ?? {
+          ...emptyEntry(),
+          text: initialText,
+          kind: /[.!?]$/.test(initialText.trim())
+            ? 'sentence'
+            : /\s/.test(initialText.trim())
+              ? 'phrase'
+              : 'word',
+        },
+    ),
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -58,14 +60,14 @@ export function EntryEditor({ entry, initialText = '', initialData, onSave, onCa
     setError('')
     try {
       await onSave(
-        {
+        normalizeSentenceVersions({
           ...data,
           text: data.text.trim(),
           pronunciationUk: data.pronunciationUk?.trim(),
           pronunciationUs: data.pronunciationUs?.trim(),
           tags: data.tags.map((tag) => tag.trim()).filter(Boolean),
           alternatives,
-        },
+        }),
         entry,
       )
     } catch (reason) {
@@ -205,6 +207,19 @@ export function EntryEditor({ entry, initialText = '', initialData, onSave, onCa
             onChange={(e) => update('domain', e.target.value)}
             placeholder="Everyday, business, academic…"
           />
+        </label>
+        <label className="field full">
+          Shared spoken & written version
+          <textarea
+            rows={2}
+            maxLength={5000}
+            value={data.sharedVersion ?? ''}
+            onChange={(e) => update('sharedVersion', e.target.value)}
+            placeholder="One natural expression for both speaking and writing"
+          />
+          <span className="field-hint">
+            Use separate versions below only when the wording differs.
+          </span>
         </label>
         <label className="field full">
           Spoken version
@@ -404,11 +419,23 @@ export function EntryEditor({ entry, initialText = '', initialData, onSave, onCa
         type="button"
         className="review-toggle"
         aria-pressed={data.practiceEnabled}
-        onClick={() => update('practiceEnabled', !data.practiceEnabled)}
+        onClick={() =>
+          setData((current) => ({
+            ...current,
+            practiceEnabled: !current.practiceEnabled,
+            collection:
+              current.collection === 'revisit' && !current.practiceEnabled
+                ? 'library'
+                : current.collection,
+          }))
+        }
       >
         <span aria-hidden="true">{data.practiceEnabled ? '✓' : '+'}</span>{' '}
         {data.practiceEnabled ? 'Added to review' : 'Add to review'}
       </button>
+      {entry?.data.collection === 'revisit' && data.practiceEnabled && (
+        <p className="helper">Saving will move this expression to Library and add it to review.</p>
+      )}
       {error && (
         <p className="message error" role="alert">
           {error}

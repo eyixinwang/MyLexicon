@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "MyLexicon Capture",
+  "version": "0.1.0",
+  "description": "Explain selected English in Chinese and keep interesting expressions in MyLexicon Revisit.",
+  "minimum_chrome_version": "102",
+  "permissions": ["activeTab", "scripting", "contextMenus", "storage"],
+  "host_permissions": [
+    "https://eyixinwang.github.io/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Explain selection in Chinese" },
+  "options_page": "options.html",
+  "icons": { "128": "icon.png" },
+  "commands": {
+    "explain-selection": {
+      "suggested_key": { "default": "Alt+Shift+L", "mac": "Alt+Shift+L" },
+      "description": "Explain selected text in Chinese"
+    }
+  }
+}
