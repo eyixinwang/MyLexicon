@@ -1,9 +1,10 @@
 import { emptyEntry, type EntryData } from '../domain/model'
 import { isEntryData } from '../domain/validation'
 import { normalizeSentenceVersions } from '../domain/sentenceVersions'
+import { DEFAULT_GEMINI_MODEL, GEMINI_API_BASE, validateGeminiModel } from './models'
 
-export const GEMINI_MODEL = 'models/gemini-3.8-flash'
-export const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/${GEMINI_MODEL}:generateContent`
+export const GEMINI_MODEL = DEFAULT_GEMINI_MODEL
+export const GEMINI_ENDPOINT = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent`
 export const QUERY_LIMIT = 5000
 
 const stringField = (description: string) => ({ type: 'string', description })
@@ -144,6 +145,7 @@ export function parseGeminiEntry(
   value: unknown,
   query: string,
   generatedAt = new Date().toISOString(),
+  model = GEMINI_MODEL,
 ): EntryData {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     throw new Error('Gemini returned an invalid entry. Nothing was saved; please try again.')
@@ -156,7 +158,12 @@ export function parseGeminiEntry(
     ...emptyEntry(),
     ...fields,
     practiceEnabled: false,
-    source: { provider: 'gemini', model: GEMINI_MODEL, query: validateQuery(query), generatedAt },
+    source: {
+      provider: 'gemini',
+      model: validateGeminiModel(model),
+      query: validateQuery(query),
+      generatedAt,
+    },
   }
   if (
     !isEntryData(candidate) ||
@@ -174,14 +181,14 @@ export function parseGeminiEntry(
   return normalizeSentenceVersions({ ...candidate, text: candidate.text.trim() })
 }
 
-export function geminiError(status: number): string {
+export function geminiError(status: number, model = GEMINI_MODEL): string {
   if (status === 400)
-    return 'Gemini rejected the query. Try rephrasing it or check the API configuration.'
+    return 'Gemini rejected the query or its response format. Choose a model that supports structured text in Settings, or try rephrasing the query.'
   if (status === 401) return 'Gemini rejected the API key. Check your key in Settings.'
   if (status === 403)
     return 'This API key cannot access Gemini. Check its API restrictions and project access.'
   if (status === 404)
-    return `${GEMINI_MODEL} is unavailable for this key. Check model access in Google AI Studio.`
+    return `${model} is unavailable for this key. Refresh the models in Settings and choose another.`
   if (status === 429)
     return 'Gemini quota or rate limit reached. Wait a little or check your project quota.'
   if (status === 503)
@@ -194,16 +201,18 @@ export async function generateGeminiEntry(
   key: string,
   signal?: AbortSignal,
   reading?: ReadingContext,
+  model = GEMINI_MODEL,
 ): Promise<EntryData> {
+  const selectedModel = validateGeminiModel(model)
   const body = geminiRequest(query, reading)
   if (!key.trim()) throw new Error('Add your Gemini API key in Settings first.')
-  const response = await fetch(GEMINI_ENDPOINT, {
+  const response = await fetch(`${GEMINI_API_BASE}/${selectedModel}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.trim() },
     body: JSON.stringify(body),
     signal,
   })
-  if (!response.ok) throw new Error(geminiError(response.status))
+  if (!response.ok) throw new Error(geminiError(response.status, selectedModel))
   const payload = (await response.json()) as {
     promptFeedback?: { blockReason?: string }
     candidates?: {
@@ -229,6 +238,6 @@ export async function generateGeminiEntry(
   } catch {
     throw new Error('Gemini returned invalid JSON. Nothing was saved; please try again.')
   }
-  const entry = parseGeminiEntry(parsed, query)
+  const entry = parseGeminiEntry(parsed, query, new Date().toISOString(), selectedModel)
   return reading ? { ...entry, text: validateQuery(query), context: reading.context.trim() } : entry
 }

@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { Operation } from '../domain/model'
 import { planSentenceVersionRepairs } from '../domain/sentenceVersions'
+import { DEFAULT_GEMINI_MODEL, validateGeminiModel } from '../ai/models'
 
 interface StoredOperation {
   id: string
@@ -123,6 +124,19 @@ export async function setGeminiKey(key: string): Promise<void> {
   const store = await db()
   if (key.trim()) await store.put('meta', key.trim(), 'geminiApiKey')
   else await store.delete('meta', 'geminiApiKey')
+}
+
+export async function getGeminiModel(): Promise<string> {
+  const model = (await (await db()).get('meta', 'geminiModel')) ?? DEFAULT_GEMINI_MODEL
+  try {
+    return validateGeminiModel(model)
+  } catch {
+    return DEFAULT_GEMINI_MODEL
+  }
+}
+
+export async function setGeminiModel(model: string): Promise<void> {
+  await (await db()).put('meta', validateGeminiModel(model), 'geminiModel')
 }
 
 export async function addImportedOperations(ops: Operation[]): Promise<number> {

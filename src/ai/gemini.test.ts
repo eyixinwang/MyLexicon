@@ -73,6 +73,57 @@ describe('Gemini integration', () => {
     expect(() => parseGeminiEntry({ ...answer(), text: '只有中文' }, 'query')).toThrow('invalid')
   })
 
+  it('uses an arbitrary selected model for both requests and saved provenance', async () => {
+    const request = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              { finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(answer()) }] } },
+            ],
+          }),
+        ),
+      ),
+    )
+    vi.stubGlobal('fetch', request)
+    const selected = 'models/gemma-future-text-model'
+    const value = await generateGeminiEntry('hello', 'private-key', undefined, undefined, selected)
+    expect(request.mock.calls[0][0]).toBe(
+      `https://generativelanguage.googleapis.com/v1beta/${selected}:generateContent`,
+    )
+    expect(value.source?.model).toBe(selected)
+    const capture = await generateGeminiEntry(
+      'hello',
+      'private-key',
+      undefined,
+      { context: 'hello there' },
+      selected,
+    )
+    expect(capture.source?.model).toBe(selected)
+    expect(capture.context).toBe('hello there')
+    await expect(
+      generateGeminiEntry(
+        'hello',
+        'private-key',
+        undefined,
+        undefined,
+        'https://untrusted.test/models/x',
+      ),
+    ).rejects.toThrow('valid Gemini model')
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports an unavailable selected model without silently switching models', async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValue(new Response('provider-private-details', { status: 404 }))
+    vi.stubGlobal('fetch', request)
+    await expect(
+      generateGeminiEntry('hello', 'private-key', undefined, undefined, 'models/selected-model'),
+    ).rejects.toThrow('models/selected-model is unavailable')
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
   it('consolidates identical generated sentence versions without rewriting the sentence', () => {
     const shared = parseGeminiEntry(
       {

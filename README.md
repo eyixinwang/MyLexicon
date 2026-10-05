@@ -17,7 +17,11 @@ Open the local URL printed by Vite. Manual capture, search, review, JSON export/
 
 ## Gemini lookup & translation
 
-The homepage accepts English words, phrases, and sentences, Chinese expressions, and Chinese requests such as “我想礼貌地说我需要更多时间”. It uses **models/gemini-3.8-flash**, with a structured JSON response, following Google's [structured output documentation](https://ai.google.dev/gemini-api/docs/generate-content/structured-output) and [REST API reference](https://ai.google.dev/api/generate-content#TextResponseFormat).
+The homepage accepts English words, phrases, and sentences, Chinese expressions, and Chinese requests such as “我想礼貌地说我需要更多时间”. It uses the model selected in **Settings → Google Gemini** (initially **models/gemini-3.8-flash**), with a structured JSON response, following Google's [structured output documentation](https://ai.google.dev/gemini-api/docs/generate-content/structured-output) and [REST API reference](https://ai.google.dev/api/generate-content#TextResponseFormat).
+
+Saving or replacing a key automatically loads all pages of Google's [model list](https://ai.google.dev/api/models#method:-models.list) for that key. Settings also reloads the list when opened and offers **Refresh models**. Every returned model is listed, including models for embeddings, audio, and other tasks; only models advertising `generateContent` can be selected for queries. There is no fixed model allowlist. Choose a model that supports structured text; the list does not guarantee JSON-schema compatibility. Incompatible requests show an error without saving a response. If a saved model is no longer listed, Settings prompts you to choose another rather than silently switching models.
+
+The selected model is saved in device metadata and used by both homepage queries and browser capture. Each saved AI answer records the model that actually produced it. The selection is configured separately on each device and excluded from JSON backups and Drive sync. Model discovery generates no AI answer, and never exposes a private development key to the browser. Model availability does **not** confirm free usage: Google's model-list metadata does not include prices or the project's billing tier. Check [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing) and your AI Studio project tier before querying; Settings links to both.
 
 The app searches the current local library before making any AI request. An exact saved expression, Chinese meaning, original query, or English alternative is reused with no API call. Context and meaning notes are searchable too. Related matches are shown first; choose **ask Gemini for this expression** if they do not answer the query. Only submitted queries are sent, not keystrokes or the full library. Saved matches work offline.
 
@@ -35,7 +39,7 @@ The Library's **Show as** controls offer **List** (compact bilingual rows), **Pr
 
 Configure a key in either of these ways:
 
-- **Local development:** set `GEMINI_API_KEY` in the ignored `.env.local` file and restart `npm run dev`. The development server runs on `127.0.0.1` and proxies only local, same-origin requests to the fixed Gemini model. The private key is never included in the built client. Do not rename it to a `VITE_` variable, which would expose it in public assets.
+- **Local development:** set `GEMINI_API_KEY` in the ignored `.env.local` file and restart `npm run dev`. The development server runs on `127.0.0.1` and proxies only local, same-origin requests to Google's fixed API host, using the selected model. It also proxies model discovery. The private key is never included in the built client. Saving a key in Settings overrides this fallback; requests then go directly to Google with that saved key. Removing it restores the private local connection. Do not rename it to a `VITE_` variable, which would expose it in public assets.
 - **Hosted app or production preview:** open **Settings → Google Gemini**, paste your own Google AI Studio key, and save it on that device. GitHub Pages is static, so these requests go directly from the browser to Google. The key is kept in local device metadata and excluded from operation logs, Drive sync, and JSON exports. It is accessible to this browser and site code; use a trusted personal device, restrict the key to the intended API/origins where supported, and set project quotas. Configure each device separately. See Google's [API key guidance](https://ai.google.dev/gemini-api/docs/api-key).
 
 No private key belongs in repository files, GitHub Pages assets, or build variables. Google project quota and billing apply to new AI requests. Failed, cancelled, blocked, truncated, or invalid responses are not saved. If saving fails, the preview or edited response remains available so you can retry saving without another AI request.
@@ -60,7 +64,18 @@ The app uses the Google Identity Services browser token flow and the narrow `dri
 4. Copy `.env.example` to `.env.local` and set `VITE_GOOGLE_CLIENT_ID` to the public web client ID. Do not add a client secret. Restart Vite after changing `.env.local`.
 5. In Settings, connect the same Google account on each device. The app binds a browser's local library to the account's stable Google ID before synchronizing. A different account cannot be silently substituted.
 
-The first connection requires a user action. Tokens expire; keep using the local library and click Reconnect when needed. The app synchronizes while it is open and authorized. Google Drive app data is hidden from the normal Drive interface, so use **Export JSON** for an independent backup. Google authorization has not been exercised against a real account in this scaffold; verify it on your own devices before relying on sync.
+The first connection requires a user action. Tokens expire; keep using the local library and reconnect when needed. Reloading the app also requires a new connection because tokens stay only in memory. The app synchronizes while it is open and authorized. Google Drive app data is hidden from the normal Drive interface, so use **Export JSON** for an independent backup.
+
+### Sync the hosted library with local development
+
+The GitHub Pages site and the local Vite site have separate browser databases. Git pushes deploy the app; saved entries sync through Google Drive.
+
+1. Use the hosted app's **same web OAuth client ID** as `VITE_GOOGLE_CLIENT_ID` in the ignored `.env.local`. It is the public ID configured as `GOOGLE_CLIENT_ID` in GitHub Actions variables, not a client secret or Gemini API key. Keep other existing environment settings.
+2. In that client's **Authorized JavaScript origins**, add the exact local origin printed by Vite. The default `npm run dev` address is `http://127.0.0.1:5173`; `http://localhost:5173` is a different origin and must be added separately if used. Restart Vite after changing `.env.local`.
+3. Open both apps and connect the **same Google account** in **Settings → Google Drive**.
+4. Click **Sync now** on the app with the latest edits, wait for **Pending changes 0**, then click **Sync now** on the other app. Each sync downloads remote changes and uploads local changes. Entries and practice history merge by change ID; conflicting edits to the same entry appear in **Settings → Conflicts**.
+
+Edits queue an automatic sync when connected. Reconnecting, returning to the tab, or coming back online also triggers sync; a tab left open does not continuously poll Drive. **Sync now** is the reliable way to request the latest changes immediately. Without Google setup, **Export JSON** on one app and **Import JSON** on the other provides a manual merge.
 
 ## Deploy to GitHub Pages
 

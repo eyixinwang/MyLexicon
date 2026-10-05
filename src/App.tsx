@@ -38,6 +38,8 @@ import {
   getBoundSubject,
   getDeviceId,
   getGeminiKey,
+  getGeminiModel,
+  setGeminiModel as persistGeminiModel,
   getLastSyncedAt,
   getOperations,
   getPendingOperations,
@@ -47,6 +49,7 @@ import {
 import { connectGoogle, prepareGoogle, type GoogleConnection } from './google/auth'
 import { syncDrive } from './google/drive'
 import { lookupGemini, LOCAL_GEMINI_PROXY } from './ai/client'
+import { DEFAULT_GEMINI_MODEL } from './ai/models'
 import { createCaptureService } from './capture/service'
 import { listenForCapture } from './capture/bridge'
 import { Revisit } from './components/Revisit'
@@ -240,6 +243,7 @@ export default function App() {
   const [usageFilter, setUsageFilter] = useState<UsageFilter>('all')
   const [libraryView, setLibraryView] = useState<LibraryViewMode>(readLibraryView)
   const [geminiKey, setGeminiKey] = useState('')
+  const [geminiModel, setGeminiModel] = useState(DEFAULT_GEMINI_MODEL)
   const [editor, setEditor] = useState<EditorState>(null)
   const [revealed, setRevealed] = useState(false)
   const [reviewIndex, setReviewIndex] = useState(0)
@@ -272,11 +276,12 @@ export default function App() {
 
   useEffect(() => {
     if (CLIENT_ID) void prepareGoogle().catch(() => undefined)
-    Promise.all([getDeviceId(), getBoundSubject(), getGeminiKey(), refresh()])
-      .then(([device, subject, key]) => {
+    Promise.all([getDeviceId(), getBoundSubject(), getGeminiKey(), getGeminiModel(), refresh()])
+      .then(([device, subject, key, model]) => {
         setDeviceId(device)
         setBoundSubject(subject)
         setGeminiKey(key)
+        setGeminiModel(model)
         setLocked(!!subject)
         setReady(true)
       })
@@ -288,6 +293,11 @@ export default function App() {
       if (syncTimer.current) clearTimeout(syncTimer.current)
     }
   }, [refresh])
+
+  const changeGeminiModel = useCallback(async (model: string) => {
+    await persistGeminiModel(model)
+    setGeminiModel(model)
+  }, [])
 
   const library = useMemo(() => deriveLibrary(operations), [operations])
   const libraryEntries = useMemo(
@@ -348,11 +358,12 @@ export default function App() {
       operations: getOperations,
       generate: async (input, signal) => {
         const key = await getGeminiKey()
+        const model = await getGeminiModel()
         if (!LOCAL_GEMINI_PROXY && !key)
           throw new Error('Add your Gemini API key in MyLexicon Settings first.')
         if (!navigator.onLine)
           throw new Error('You are offline. This contextual explanation needs Gemini.')
-        return lookupGemini(input.text, key, signal, { context: input.context })
+        return lookupGemini(input.text, key, signal, { context: input.context }, model)
       },
       persist: addLocalOperationOnce,
       changed: () => captureChanged.current(),
@@ -687,6 +698,7 @@ export default function App() {
               </section>
               <AIQuery
                 apiKey={geminiKey}
+                model={geminiModel}
                 enabled={!!deviceId}
                 onSave={saveGeneratedEntry}
                 onManual={(text) => setEditor({ initialText: text })}
@@ -951,7 +963,12 @@ export default function App() {
                 </p>
               </div>
               <div className="settings-grid">
-                <GeminiSettings apiKey={geminiKey} onChange={setGeminiKey} />
+                <GeminiSettings
+                  apiKey={geminiKey}
+                  model={geminiModel}
+                  onChange={setGeminiKey}
+                  onModelChange={changeGeminiModel}
+                />
                 <section className="settings-card">
                   <span className="eyebrow">KEEP YOUR READING FLOW</span>
                   <h2>Browser capture</h2>

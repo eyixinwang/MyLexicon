@@ -8,6 +8,7 @@ import { EntryEditor } from './EntryEditor'
 
 interface Props {
   apiKey: string
+  model: string
   enabled: boolean
   onSave: (data: EntryData) => Promise<EntryView>
   onManual: (text: string) => void
@@ -18,6 +19,7 @@ interface Props {
 
 export function AIQuery({
   apiKey,
+  model,
   enabled,
   onSave,
   onManual,
@@ -66,7 +68,7 @@ export function AIQuery({
             )
           setStage('Asking Gemini…')
           timeout = setTimeout(() => abort.abort(), 65000)
-          const data = await lookupGemini(text, apiKey, abort.signal)
+          const data = await lookupGemini(text, apiKey, abort.signal, undefined, model)
           clearTimeout(timeout)
           return data
         },
