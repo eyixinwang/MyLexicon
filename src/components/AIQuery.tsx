@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { lookupGemini, LOCAL_GEMINI_PROXY } from '../ai/client'
+import { canConnect, lookupAI } from '../ai/providerClient'
+import { providers, type AIProfile } from '../ai/providerConfig'
 import { QUERY_LIMIT } from '../ai/gemini'
 import { resolveQuery } from '../ai/lookup'
 import { getOperations } from '../data/storage'
@@ -7,8 +8,7 @@ import { type EntryData, type EntryView } from '../domain/model'
 import { EntryEditor } from './EntryEditor'
 
 interface Props {
-  apiKey: string
-  model: string
+  profile: AIProfile
   enabled: boolean
   onSave: (data: EntryData) => Promise<EntryView>
   onManual: (text: string) => void
@@ -18,8 +18,7 @@ interface Props {
 }
 
 export function AIQuery({
-  apiKey,
-  model,
+  profile,
   enabled,
   onSave,
   onManual,
@@ -33,7 +32,7 @@ export function AIQuery({
   const [error, setError] = useState('')
   const [result, setResult] = useState<{
     query: string
-    source: 'saved' | 'related' | 'gemini'
+    source: 'saved' | 'related' | 'generated'
     entries: EntryView[]
   }>()
   const [draft, setDraft] = useState<EntryData>()
@@ -60,22 +59,22 @@ export function AIQuery({
         await getOperations(),
         async () => {
           if (abort.signal.aborted) throw new Error('Query cancelled. Nothing was saved.')
-          if (!LOCAL_GEMINI_PROXY && !apiKey)
-            throw new Error('Add your Gemini API key in Settings to look up new expressions.')
+          if (!canConnect(profile))
+            throw new Error('Add your provider API key in Settings to look up new expressions.')
           if (!navigator.onLine)
             throw new Error(
-              'You’re offline. Saved entries are available; reconnect to ask Gemini for something new.',
+              'You’re offline. Saved entries are available; reconnect to ask AI for something new.',
             )
-          setStage('Asking Gemini…')
+          setStage('Asking ' + providers[profile.provider].label + '…')
           timeout = setTimeout(() => abort.abort(), 65000)
-          const data = await lookupGemini(text, apiKey, abort.signal, undefined, model)
+          const data = await lookupAI(text, profile, abort.signal)
           clearTimeout(timeout)
           return data
         },
         useAI,
       )
       if (abort.signal.aborted) throw new Error('Query cancelled. Nothing was saved.')
-      if (resolved.source !== 'gemini') {
+      if (resolved.source !== 'generated') {
         setResult({ query: text, source: resolved.source, entries: resolved.entries })
         return
       }
@@ -107,7 +106,11 @@ export function AIQuery({
       const entry = await onSave(data)
       setDraft(undefined)
       setEditing(false)
-      setResult({ query: data.source?.query ?? query.trim(), source: 'gemini', entries: [entry] })
+      setResult({
+        query: data.source?.query ?? query.trim(),
+        source: 'generated',
+        entries: [entry],
+      })
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -169,10 +172,10 @@ export function AIQuery({
           Add manually
         </button>
       </div>
-      {!LOCAL_GEMINI_PROXY && !apiKey && (
+      {!canConnect(profile) && (
         <p className="helper">
           <button className="text-button" onClick={onSettings}>
-            Connect Gemini in Settings →
+            Connect AI in Settings →
           </button>{' '}
           You can search saved entries now.
         </p>
@@ -196,7 +199,9 @@ export function AIQuery({
         <div className="query-results">
           <div className="query-result-heading" role="status">
             <strong>Review your response</strong>
-            <span className="muted small">Gemini · Not saved</span>
+            <span className="muted small">
+              {providers[draft.source?.provider ?? profile.provider].label} · Not saved
+            </span>
           </div>
           <p className="helper query-submitted">For “{draft.source?.query ?? query.trim()}”</p>
           <p className="draft-prompt">
@@ -262,7 +267,7 @@ export function AIQuery({
                   : 'Saved to your lexicon'}
             </strong>
             <span className="muted small">
-              {result.source === 'gemini' ? 'Gemini · AI generated' : 'No AI request used'}
+              {result.source === 'generated' ? 'AI generated' : 'No AI request used'}
             </span>
           </div>
           <p className="helper query-submitted">For “{result.query}”</p>
@@ -270,7 +275,7 @@ export function AIQuery({
             <p className="helper">
               If these don’t answer your query,{' '}
               <button className="text-button" onClick={() => void run(result.query, true)}>
-                ask Gemini for this expression →
+                ask AI for this expression →
               </button>
             </p>
           )}

@@ -1,3 +1,4 @@
+import { isProvider } from '../ai/providerConfig'
 import type { EntryData, Operation } from './model'
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -71,8 +72,8 @@ export function isEntryData(value: unknown): value is EntryData {
         ))) &&
     (value.source === undefined ||
       (record(value.source) &&
-        value.source.provider === 'gemini' &&
-        shortString(value.source.model, 100) &&
+        isProvider(value.source.provider) &&
+        shortString(value.source.model, 256) &&
         shortString(value.source.query, 5000) &&
         shortString(value.source.generatedAt, 40) &&
         Number.isFinite(Date.parse(value.source.generatedAt))))

@@ -16,7 +16,7 @@ export interface TranslationAlternative {
 }
 
 export interface EntrySource {
-  provider: 'gemini'
+  provider: import('../ai/providerConfig').Provider
   model: string
   query: string
   generatedAt: string

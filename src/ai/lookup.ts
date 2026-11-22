@@ -3,7 +3,7 @@ import { searchEntries } from '../domain/search'
 import { validateQuery } from './gemini'
 
 type LookupResult =
-  { source: 'saved' | 'related'; entries: EntryView[] } | { source: 'gemini'; data: EntryData }
+  { source: 'saved' | 'related'; entries: EntryView[] } | { source: 'generated'; data: EntryData }
 
 export async function resolveQuery(
   query: string,
@@ -37,5 +37,5 @@ export async function resolveQuery(
       'Saved versions of this expression have a conflict. Resolve it in Settings first.',
     )
   if (matches.related.length && !useAI) return { source: 'related', entries: matches.related }
-  return { source: 'gemini', data: await generate(text) }
+  return { source: 'generated', data: await generate(text) }
 }

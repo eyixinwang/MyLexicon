@@ -86,7 +86,7 @@ describe('local-first query flow', () => {
     expect((await resolveQuery('around', [operation()], generate)).source).toBe('related')
     expect(generate).not.toHaveBeenCalled()
     expect(await resolveQuery('around', [operation()], generate, true)).toEqual({
-      source: 'gemini',
+      source: 'generated',
       data,
     })
     expect(generate).toHaveBeenCalledTimes(1)

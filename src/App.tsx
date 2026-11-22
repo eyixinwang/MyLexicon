@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { EntryEditor } from './components/EntryEditor'
 import { AIQuery } from './components/AIQuery'
-import { GeminiSettings } from './components/GeminiSettings'
+import { AISettings } from './components/AISettings'
 import { TranslationAlternatives } from './components/TranslationAlternatives'
 import { EntryPronunciation } from './components/EntryPronunciation'
 import { EntryVersions } from './components/EntryVersions'
@@ -37,9 +37,7 @@ import {
   bindSubject,
   getBoundSubject,
   getDeviceId,
-  getGeminiKey,
-  getGeminiModel,
-  setGeminiModel as persistGeminiModel,
+  readAIProfile,
   getLastSyncedAt,
   getOperations,
   getPendingOperations,
@@ -48,8 +46,8 @@ import {
 } from './data/storage'
 import { connectGoogle, prepareGoogle, type GoogleConnection } from './google/auth'
 import { syncDrive } from './google/drive'
-import { lookupGemini, LOCAL_GEMINI_PROXY } from './ai/client'
-import { DEFAULT_GEMINI_MODEL } from './ai/models'
+import { canConnect, lookupAI } from './ai/providerClient'
+import { initialProfile, providers } from './ai/providerConfig'
 import { createCaptureService } from './capture/service'
 import { listenForCapture } from './capture/bridge'
 import { Revisit } from './components/Revisit'
@@ -187,7 +185,7 @@ export function EntryCard({
       )}
       {entry.data.source && (
         <details className="entry-source">
-          <summary>AI generated · Gemini</summary>
+          <summary>AI generated · {providers[entry.data.source.provider].label}</summary>
           <p>Original query: {entry.data.source.query}</p>
           <p>
             {entry.data.source.model} · {dateLabel(entry.data.source.generatedAt)}
@@ -242,8 +240,7 @@ export default function App() {
   const [category, setCategory] = useState<EntryCategory>('expressions')
   const [usageFilter, setUsageFilter] = useState<UsageFilter>('all')
   const [libraryView, setLibraryView] = useState<LibraryViewMode>(readLibraryView)
-  const [geminiKey, setGeminiKey] = useState('')
-  const [geminiModel, setGeminiModel] = useState(DEFAULT_GEMINI_MODEL)
+  const [profile, setProfile] = useState(initialProfile)
   const [editor, setEditor] = useState<EditorState>(null)
   const [revealed, setRevealed] = useState(false)
   const [reviewIndex, setReviewIndex] = useState(0)
@@ -276,12 +273,11 @@ export default function App() {
 
   useEffect(() => {
     if (CLIENT_ID) void prepareGoogle().catch(() => undefined)
-    Promise.all([getDeviceId(), getBoundSubject(), getGeminiKey(), getGeminiModel(), refresh()])
-      .then(([device, subject, key, model]) => {
+    Promise.all([getDeviceId(), getBoundSubject(), readAIProfile(), refresh()])
+      .then(([device, subject, settings]) => {
         setDeviceId(device)
         setBoundSubject(subject)
-        setGeminiKey(key)
-        setGeminiModel(model)
+        setProfile(settings)
         setLocked(!!subject)
         setReady(true)
       })
@@ -293,11 +289,6 @@ export default function App() {
       if (syncTimer.current) clearTimeout(syncTimer.current)
     }
   }, [refresh])
-
-  const changeGeminiModel = useCallback(async (model: string) => {
-    await persistGeminiModel(model)
-    setGeminiModel(model)
-  }, [])
 
   const library = useMemo(() => deriveLibrary(operations), [operations])
   const libraryEntries = useMemo(
@@ -357,13 +348,12 @@ export default function App() {
       state: () => captureState.current,
       operations: getOperations,
       generate: async (input, signal) => {
-        const key = await getGeminiKey()
-        const model = await getGeminiModel()
-        if (!LOCAL_GEMINI_PROXY && !key)
-          throw new Error('Add your Gemini API key in MyLexicon Settings first.')
+        const settings = await readAIProfile()
+        if (!canConnect(settings))
+          throw new Error('Add your provider API key in MyLexicon Settings first.')
         if (!navigator.onLine)
-          throw new Error('You are offline. This contextual explanation needs Gemini.')
-        return lookupGemini(input.text, key, signal, { context: input.context }, model)
+          throw new Error('You are offline. This contextual explanation needs an AI connection.')
+        return lookupAI(input.text, settings, signal, { context: input.context })
       },
       persist: addLocalOperationOnce,
       changed: () => captureChanged.current(),
@@ -697,8 +687,7 @@ export default function App() {
                 </p>
               </section>
               <AIQuery
-                apiKey={geminiKey}
-                model={geminiModel}
+                profile={profile}
                 enabled={!!deviceId}
                 onSave={saveGeneratedEntry}
                 onManual={(text) => setEditor({ initialText: text })}
@@ -963,12 +952,7 @@ export default function App() {
                 </p>
               </div>
               <div className="settings-grid">
-                <GeminiSettings
-                  apiKey={geminiKey}
-                  model={geminiModel}
-                  onChange={setGeminiKey}
-                  onModelChange={changeGeminiModel}
-                />
+                <AISettings profile={profile} onChange={setProfile} />
                 <section className="settings-card">
                   <span className="eyebrow">KEEP YOUR READING FLOW</span>
                   <h2>Browser capture</h2>
@@ -993,9 +977,9 @@ export default function App() {
                     {import.meta.env.BASE_URL}
                   </code>
                   <p className="helper">
-                    Use your existing Gemini setup. The service must be open and unlocked in the
-                    same browser profile; capture can open a background service tab. New
-                    explanations send only your selection and a short surrounding passage to Gemini.
+                    Use your selected AI provider. The service must be open and unlocked in the same
+                    browser profile; capture can open a background service tab. New explanations
+                    send only your selection and a short surrounding passage to that provider.
                   </p>
                 </section>
                 <section className="settings-card">

@@ -1,7 +1,8 @@
+import { isProvider, type Provider, type AIProfile } from '../ai/providerConfig'
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { Operation } from '../domain/model'
 import { planSentenceVersionRepairs } from '../domain/sentenceVersions'
-import { DEFAULT_GEMINI_MODEL, validateGeminiModel } from '../ai/models'
+import { DEFAULT_GEMINI_MODEL } from '../ai/models'
 
 interface StoredOperation {
   id: string
@@ -115,30 +116,6 @@ export async function addLocalOperationOnce(op: Operation): Promise<void> {
   if (!existing) notifyChanged()
 }
 
-// Credentials stay in device metadata, outside the operation log, Drive, and backups.
-export async function getGeminiKey(): Promise<string> {
-  return (await (await db()).get('meta', 'geminiApiKey')) ?? ''
-}
-
-export async function setGeminiKey(key: string): Promise<void> {
-  const store = await db()
-  if (key.trim()) await store.put('meta', key.trim(), 'geminiApiKey')
-  else await store.delete('meta', 'geminiApiKey')
-}
-
-export async function getGeminiModel(): Promise<string> {
-  const model = (await (await db()).get('meta', 'geminiModel')) ?? DEFAULT_GEMINI_MODEL
-  try {
-    return validateGeminiModel(model)
-  } catch {
-    return DEFAULT_GEMINI_MODEL
-  }
-}
-
-export async function setGeminiModel(model: string): Promise<void> {
-  await (await db()).put('meta', validateGeminiModel(model), 'geminiModel')
-}
-
 export async function addImportedOperations(ops: Operation[]): Promise<number> {
   const store = await db()
   // Check the entire import before opening a write transaction so a duplicate
@@ -203,4 +180,36 @@ export async function getLastSyncedAt(): Promise<string | undefined> {
 
 export async function setLastSyncedAt(at: string): Promise<void> {
   await (await db()).put('meta', at, 'lastSyncedAt')
+}
+
+const keySlot = (provider: Provider) =>
+  provider === 'gemini' ? 'geminiApiKey' : provider + 'ApiKey'
+const modelSlot = (provider: Provider) =>
+  provider === 'gemini' ? 'geminiModel' : provider + 'Model'
+
+// Read the provider and its credentials in the same transaction, including when switching.
+export async function readAIProfile(select?: Provider): Promise<AIProfile> {
+  const tx = (await db()).transaction('meta', 'readwrite')
+  if (select) await tx.store.put(select, 'aiProvider')
+  const stored = select ?? (await tx.store.get('aiProvider'))
+  const provider = isProvider(stored) ? stored : 'gemini'
+  const [key, model] = await Promise.all([
+    tx.store.get(keySlot(provider)),
+    tx.store.get(modelSlot(provider)),
+  ])
+  await tx.done
+  return {
+    provider,
+    key: key ?? '',
+    model: model ?? (provider === 'gemini' ? DEFAULT_GEMINI_MODEL : ''),
+  }
+}
+
+export async function saveAIKey(provider: Provider, key: string) {
+  const store = await db()
+  if (key.trim()) await store.put('meta', key.trim(), keySlot(provider))
+  else await store.delete('meta', keySlot(provider))
+}
+export async function saveAIModel(provider: Provider, model: string) {
+  await (await db()).put('meta', model, modelSlot(provider))
 }

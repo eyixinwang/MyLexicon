@@ -1,3 +1,4 @@
+import { providers, type Provider } from './providerConfig'
 import { emptyEntry, type EntryData } from '../domain/model'
 import { isEntryData } from '../domain/validation'
 import { normalizeSentenceVersions } from '../domain/sentenceVersions'
@@ -146,12 +147,13 @@ export function parseGeminiEntry(
   query: string,
   generatedAt = new Date().toISOString(),
   model = GEMINI_MODEL,
+  provider: Provider = 'gemini',
 ): EntryData {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
-    throw new Error('Gemini returned an invalid entry. Nothing was saved; please try again.')
+    throw new Error(`${providers[provider].label} returned an invalid entry. Nothing was saved.`)
   const raw = value as Record<string, unknown>
   if (Object.keys(properties).some((key) => !(key in raw)))
-    throw new Error('Gemini returned an incomplete entry. Nothing was saved; please try again.')
+    throw new Error(`${providers[provider].label} returned an incomplete entry. Nothing was saved.`)
   // Copy only schema fields; generated JSON cannot set review state or provenance.
   const fields = Object.fromEntries(Object.keys(properties).map((key) => [key, raw[key]]))
   const candidate: unknown = {
@@ -159,8 +161,8 @@ export function parseGeminiEntry(
     ...fields,
     practiceEnabled: false,
     source: {
-      provider: 'gemini',
-      model: validateGeminiModel(model),
+      provider,
+      model: provider === 'gemini' ? validateGeminiModel(model) : model,
       query: validateQuery(query),
       generatedAt,
     },
@@ -177,7 +179,7 @@ export function parseGeminiEntry(
     ) ||
     candidate.tags.length > 8
   )
-    throw new Error('Gemini returned an invalid entry. Nothing was saved; please try again.')
+    throw new Error(`${providers[provider].label} returned an invalid entry. Nothing was saved.`)
   return normalizeSentenceVersions({ ...candidate, text: candidate.text.trim() })
 }
 

@@ -72,7 +72,7 @@
       *{box-sizing:border-box}section{font:14px/1.55 system-ui,-apple-system,"PingFang SC",sans-serif;color:#234638;color-scheme:light;width:min(390px,calc(100vw - 24px));max-height:min(560px,calc(100vh - 32px));overflow:auto;background:#fffef8;border:1px solid #d5dfcf;border-radius:16px;padding:20px;box-shadow:0 12px 44px #12352130;text-align:left}
       header{display:flex;align-items:center;justify-content:space-between;gap:12px}.brand{font-size:11px;letter-spacing:1.5px;font-weight:700;color:#6f8069}
       h2{font-size:21px;line-height:1.35;overflow-wrap:anywhere;margin:12px 0}p{white-space:pre-wrap;overflow-wrap:anywhere;margin:9px 0}.meaning{font-size:17px;font-weight:600}.small{font-size:12px;color:#70826d}.error{color:#a0392d}button{font:inherit;cursor:pointer;border:0;border-radius:8px;padding:9px 12px;background:#285742;color:white}button:disabled{cursor:default;opacity:.65}button:focus-visible,summary:focus-visible{outline:2px solid #285742;outline-offset:3px}.close{background:transparent;color:#617661;font-size:23px;padding:0 4px}.secondary{background:#edf1e7;color:#31583f}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}blockquote{font-size:12px;margin:14px 0 0;padding:10px 12px;border-left:3px solid #b6cbb1;background:#f4f6ee;white-space:pre-wrap;overflow-wrap:anywhere}details{margin-top:10px}summary{cursor:pointer;font-size:12px;color:#587655}
-    </style><section aria-label="MyLexicon 中文解释" role="region"><header><span class="brand">MYLEXICON · 阅读助手</span><button class="close" aria-label="关闭解释">×</button></header><h2></h2><p class="status small" role="status" aria-live="polite"></p><div class="answer" hidden><p class="meaning" lang="zh"></p><p class="usage" lang="zh"></p><p class="notes small" lang="zh"></p><details><summary>查看原文语境</summary><blockquote></blockquote></details></div><div class="actions"><button class="save" hidden>加入 Revisit</button><button class="retry secondary" hidden>重试</button><button class="open secondary">打开 MyLexicon</button></div><p class="small footnote">Gemini 解释仅供参考 · 按 Esc 返回阅读</p></section>`
+    </style><section aria-label="MyLexicon 中文解释" role="region"><header><span class="brand">MYLEXICON · 阅读助手</span><button class="close" aria-label="关闭解释">×</button></header><h2></h2><p class="status small" role="status" aria-live="polite"></p><div class="answer" hidden><p class="meaning" lang="zh"></p><p class="usage" lang="zh"></p><p class="notes small" lang="zh"></p><details><summary>查看原文语境</summary><blockquote></blockquote></details></div><div class="actions"><button class="save" hidden>加入 Revisit</button><button class="retry secondary" hidden>重试</button><button class="open secondary">打开 MyLexicon</button></div><p class="small footnote">AI 解释仅供参考 · 按 Esc 返回阅读</p></section>`
     const $ = (selector) => shadow.querySelector(selector)
     $('h2').textContent = input.text || '请选择英文单词、短语或句子'
     const width = Math.min(390, window.innerWidth - 24)
@@ -153,7 +153,7 @@
         $('.save').textContent = result.saved ? '已保存' : '加入 Revisit'
         $('.footnote').textContent = result.reused
           ? '来自已保存的解释 · 按 Esc 返回阅读'
-          : 'Gemini 解释仅供参考 · 按 Esc 返回阅读'
+          : 'AI 解释仅供参考 · 按 Esc 返回阅读'
       } catch (error) {
         if (current !== state) return
         state.requestId = undefined
